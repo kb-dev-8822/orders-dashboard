@@ -77,18 +77,21 @@ try:
             # פיצול לשני שדות נפרדים למראה נקי יותר
             col_date1, col_date2 = st.sidebar.columns(2) 
             
+            # --- כאן בוצע השינוי לפורמט ישראלי ---
             start_date = st.sidebar.date_input(
                 "מתאריך:",
                 value=min_date,
                 min_value=min_date,
-                max_value=max_date
+                max_value=max_date,
+                format="DD/MM/YYYY" # פורמט יום/חודש/שנה
             )
             
             end_date = st.sidebar.date_input(
                 "עד תאריך:",
                 value=max_date,
                 min_value=min_date,
-                max_value=max_date
+                max_value=max_date,
+                format="DD/MM/YYYY" # פורמט יום/חודש/שנה
             )
             
             if start_date > end_date:
