@@ -192,14 +192,12 @@ try:
     # --- מדדים ראשיים (KPIs) - מעודכן לחבילות ---
     total_rows = len(df_filtered)
     
-    # חישוב חבילות לפי סוג (ולא הזמנות)
+    # חישוב חבילות לפי סוג
     total_packages = int(df_filtered[COL_QUANTITY].sum())
     
-    # חישוב חבילות להזמנות רגילות (איפה שיש מספר משלוח)
     regular_mask = df_filtered[COL_SHIP_NUM].notna()
     regular_packages = int(df_filtered.loc[regular_mask, COL_QUANTITY].sum())
     
-    # חישוב חבילות להתקנות (איפה שאין מספר משלוח)
     install_mask = df_filtered[COL_SHIP_NUM].isna()
     install_packages = int(df_filtered.loc[install_mask, COL_QUANTITY].sum())
 
@@ -213,30 +211,6 @@ try:
     if search_term and total_packages_in_date_range > 0:
         search_share_pct = (total_packages / total_packages_in_date_range) * 100
         st.info(f"📊 תוצאות החיפוש מהוות **{search_share_pct:.1f}%** מסך החבילות בטווח התאריכים הנבחר ({total_packages} מתוך {int(total_packages_in_date_range)})")
-
-    st.markdown("---")
-
-    # --- גרף מגמות ---
-    st.subheader("📈 פעילות יומית")
-    if 'date_only' in df_filtered.columns and not df_filtered.empty:
-        # הקבצה לפי תאריך
-        daily_data = df_filtered.groupby('date_only').agg({
-            COL_QUANTITY: 'sum',  # סכום חבילות
-            COL_SKU: 'count'      # מספר שורות (הזמנות/פריטים)
-        }).rename(columns={COL_QUANTITY: 'חבילות', COL_SKU: 'מספר שורות'})
-        
-        tab1, tab2 = st.tabs(["📝 מספר הזמנות", "📊 כמות חבילות"])
-        
-        with tab1:
-            st.caption("מספר הרשומות/הזמנות לכל יום (גרף קווי)")
-            st.line_chart(daily_data['מספר שורות'], color="#E74C3C") 
-
-        with tab2:
-            st.caption("כמות החבילות הכוללת לכל יום (גרף עמודות)")
-            st.bar_chart(daily_data['חבילות'], color="#2E86C1") 
-            
-    else:
-        st.info("אין מספיק נתונים להצגת גרף")
 
     st.markdown("---")
 
@@ -268,16 +242,39 @@ try:
                 st.dataframe(top_5, hide_index=True, use_container_width=True)
 
             with col_bottom:
-                st.subheader("🐢 3 המוצרים החלשים")
-                # לוקחים את ה-3 עם הכמות הכי נמוכה (אבל שגדולים מ-0, כי הם קיימים ברשימה)
-                bottom_3 = sku_stats.sort_values(by=COL_QUANTITY, ascending=True).head(3).copy()
+                st.subheader("🐢 5 המוצרים החלשים")
+                # לוקחים את ה-5 עם הכמות הכי נמוכה
+                bottom_5 = sku_stats.sort_values(by=COL_QUANTITY, ascending=True).head(5).copy()
                 if total_q_current > 0:
-                    bottom_3['נתח שוק (%)'] = (bottom_3[COL_QUANTITY] / total_q_current * 100).round(1).astype(str) + '%'
-                bottom_3 = bottom_3.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
-                st.dataframe(bottom_3, hide_index=True, use_container_width=True)
+                    bottom_5['נתח שוק (%)'] = (bottom_5[COL_QUANTITY] / total_q_current * 100).round(1).astype(str) + '%'
+                bottom_5 = bottom_5.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
+                st.dataframe(bottom_5, hide_index=True, use_container_width=True)
 
     else:
         st.warning("אין מספיק נתונים לחישוב סטטיסטיקות")
+
+    st.markdown("---")
+
+    # --- גרף מגמות (הוזז למטה) ---
+    st.subheader("📈 פעילות יומית")
+    if 'date_only' in df_filtered.columns and not df_filtered.empty:
+        daily_data = df_filtered.groupby('date_only').agg({
+            COL_QUANTITY: 'sum',  # סכום חבילות
+            COL_SKU: 'count'      # מספר שורות
+        }).rename(columns={COL_QUANTITY: 'חבילות', COL_SKU: 'מספר שורות'})
+        
+        tab1, tab2 = st.tabs(["📝 מספר הזמנות", "📊 כמות חבילות"])
+        
+        with tab1:
+            st.caption("מספר הרשומות/הזמנות לכל יום (גרף קווי)")
+            st.line_chart(daily_data['מספר שורות'], color="#E74C3C") 
+
+        with tab2:
+            st.caption("כמות החבילות הכוללת לכל יום (גרף עמודות)")
+            st.bar_chart(daily_data['חבילות'], color="#2E86C1") 
+            
+    else:
+        st.info("אין מספיק נתונים להצגת גרף")
 
     st.markdown("---")
 
