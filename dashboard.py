@@ -31,7 +31,7 @@ st.markdown("""
         direction: rtl;
         text-align: right;
     }
-    h1, h2, h3, p, div, .stMarkdown, .stRadio, .stSelectbox, .stTextInput {
+    h1, h2, h3, p, div, .stMarkdown, .stRadio, .stSelectbox, .stTextInput, .stAlert {
         text-align: right;
     }
     [data-testid="stMetricValue"] {
@@ -118,9 +118,11 @@ def load_data():
 
 try:
     df = load_data()
+    
+    # עותק בסיסי (לפני סינונים)
     df_filtered = df.copy()
 
-    # --- כותרת ופילטר עליון ---
+    # --- כותרת ופילטר תאריכים ---
     st.title("📦 דשבורד ניהול הזמנות")
 
     with st.container():
@@ -144,10 +146,15 @@ try:
 
         if start_date and end_date:
             if start_date <= end_date:
+                # סינון תאריכים
                 mask_date = (df['date_only'] >= start_date) & (df['date_only'] <= end_date)
                 df_filtered = df_filtered.loc[mask_date]
             else:
                 st.error("⚠️ תאריך התחלה מאוחר מתאריך סיום")
+
+    # שמירת נתונים מסונני תאריך (לפני סינון חיפוש) לטובת חישובי אחוזים
+    df_date_range_only = df_filtered.copy()
+    total_packages_in_date_range = df_date_range_only[COL_QUANTITY].sum()
 
     st.markdown("---")
 
@@ -168,6 +175,7 @@ try:
     placeholder_text = f"הקלד {search_type_label}..."
     search_term = st.sidebar.text_input("ערך לחיפוש:", placeholder=placeholder_text)
 
+    # ביצוע החיפוש בפועל
     if search_term:
         if selected_col == COL_PHONE:
             clean_input = normalize_phone_str(search_term)
@@ -181,74 +189,30 @@ try:
         else:
              st.sidebar.warning(f"העמודה '{selected_col}' לא נמצאה.")
 
-    # --- מדדים ראשיים (KPIs) ---
+    # --- מדדים ראשיים (KPIs) - מעודכן לחבילות ---
     total_rows = len(df_filtered)
-    if COL_SHIP_NUM in df_filtered.columns:
-        installs = df_filtered[COL_SHIP_NUM].isna().sum()
-        regular = df_filtered[COL_SHIP_NUM].notna().sum()
-    else:
-        installs = 0
-        regular = total_rows
-
-    total_packages = 0
-    if COL_QUANTITY in df_filtered.columns:
-        total_packages = int(df_filtered[COL_QUANTITY].sum())
+    
+    # חישוב חבילות לפי סוג (ולא הזמנות)
+    total_packages = int(df_filtered[COL_QUANTITY].sum())
+    
+    # חישוב חבילות להזמנות רגילות (איפה שיש מספר משלוח)
+    regular_mask = df_filtered[COL_SHIP_NUM].notna()
+    regular_packages = int(df_filtered.loc[regular_mask, COL_QUANTITY].sum())
+    
+    # חישוב חבילות להתקנות (איפה שאין מספר משלוח)
+    install_mask = df_filtered[COL_SHIP_NUM].isna()
+    install_packages = int(df_filtered.loc[install_mask, COL_QUANTITY].sum())
 
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     kpi1.metric("📦 סה\"כ רשומות", total_rows)
     kpi2.metric("🔢 סה\"כ חבילות", f"{total_packages:,}")
-    kpi3.metric("🚛 הזמנות רגילות", regular)
-    kpi4.metric("🛠️ התקנות", installs)
+    kpi3.metric("🚛 הזמנות רגילות (חבילות)", f"{regular_packages:,}")
+    kpi4.metric("🛠️ התקנות (חבילות)", f"{install_packages:,}")
     
-    st.markdown("---")
-
-    # --- סטטיסטיקה מהירה (עודכן לחישוב לפי כמות ולא לפי שורות) ---
-    if not df_filtered.empty:
-        stat1, stat2, stat3 = st.columns(3)
-        
-        # מק"ט מוביל (לפי כמות!)
-        if COL_SKU in df_filtered.columns and COL_QUANTITY in df_filtered.columns:
-            # מקבצים לפי מק"ט וסוכמים את הכמויות
-            sku_quantity_sums = df_filtered.groupby(COL_SKU)[COL_QUANTITY].sum()
-            
-            if not sku_quantity_sums.empty:
-                # הכי נמכר
-                best_seller = sku_quantity_sums.idxmax()
-                count_best = int(sku_quantity_sums.max())
-                
-                # הכי חלש
-                weakest_seller = sku_quantity_sums.idxmin()
-                count_weak = int(sku_quantity_sums.min())
-                
-                stat1.metric("🌟 המק\"ט הכי נמכר", f"{best_seller}", f"{count_best} יחידות")
-                stat2.metric("🐢 המק\"ט הכי חלש", f"{weakest_seller}", f"{count_weak} יחידות")
-            else:
-                stat1.metric("🌟 המק\"ט הכי נמכר", "-", "-")
-                stat2.metric("🐢 המק\"ט הכי חלש", "-", "-")
-        
-        # לקוח מוביל (נשאר לפי מספר הזמנות כי זה הגיוני יותר ללקוח)
-        if COL_CUSTOMER in df_filtered.columns:
-            top_cust = df_filtered[COL_CUSTOMER].value_counts()
-            if not top_cust.empty:
-                best_cust = top_cust.idxmax()
-                count_cust = top_cust.max()
-                stat3.metric("👑 לקוח מוביל", f"{best_cust}", f"{count_cust} הזמנות")
-
-    # --- רשימת 5 המק"טים המובילים ---
-    with st.expander("🏆 5 המוצרים הנמכרים ביותר (לחץ לפירוט)", expanded=False):
-        if COL_SKU in df_filtered.columns and COL_QUANTITY in df_filtered.columns:
-            # קיבוץ לפי מק"ט וסיכום כמויות
-            sku_stats = df_filtered.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index()
-            sku_stats = sku_stats.sort_values(by=COL_QUANTITY, ascending=False).head(5)
-            
-            total_q = df_filtered[COL_QUANTITY].sum()
-            if total_q > 0:
-                sku_stats['נתח שוק (%)'] = (sku_stats[COL_QUANTITY] / total_q * 100).round(1).astype(str) + '%'
-            
-            sku_stats = sku_stats.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'סה"כ חבילות שנמכרו'})
-            st.dataframe(sku_stats, hide_index=True, use_container_width=True)
-        else:
-            st.warning("חסרים נתונים לחישוב מק\"טים מובילים")
+    # --- תצוגת אחוז נתח שוק בחיפוש ---
+    if search_term and total_packages_in_date_range > 0:
+        search_share_pct = (total_packages / total_packages_in_date_range) * 100
+        st.info(f"📊 תוצאות החיפוש מהוות **{search_share_pct:.1f}%** מסך החבילות בטווח התאריכים הנבחר ({total_packages} מתוך {int(total_packages_in_date_range)})")
 
     st.markdown("---")
 
@@ -273,6 +237,47 @@ try:
             
     else:
         st.info("אין מספיק נתונים להצגת גרף")
+
+    st.markdown("---")
+
+    # --- סטטיסטיקה מהירה + טבלאות ---
+    if not df_filtered.empty and COL_SKU in df_filtered.columns and COL_QUANTITY in df_filtered.columns:
+        
+        # חישוב סטטיסטיקות מק"ט
+        sku_stats = df_filtered.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index()
+        total_q_current = df_filtered[COL_QUANTITY].sum()
+        
+        if not sku_stats.empty:
+            # מק"ט מוביל
+            best_sku_row = sku_stats.loc[sku_stats[COL_QUANTITY].idxmax()]
+            best_seller = best_sku_row[COL_SKU]
+            count_best = int(best_sku_row[COL_QUANTITY])
+            
+            st.metric("🌟 המק\"ט הכי נמכר", f"{best_seller}", f"{count_best} חבילות")
+            
+            st.divider()
+            
+            col_top, col_bottom = st.columns(2)
+            
+            with col_top:
+                st.subheader("🏆 5 המוצרים המובילים")
+                top_5 = sku_stats.sort_values(by=COL_QUANTITY, ascending=False).head(5).copy()
+                if total_q_current > 0:
+                    top_5['נתח שוק (%)'] = (top_5[COL_QUANTITY] / total_q_current * 100).round(1).astype(str) + '%'
+                top_5 = top_5.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
+                st.dataframe(top_5, hide_index=True, use_container_width=True)
+
+            with col_bottom:
+                st.subheader("🐢 3 המוצרים החלשים")
+                # לוקחים את ה-3 עם הכמות הכי נמוכה (אבל שגדולים מ-0, כי הם קיימים ברשימה)
+                bottom_3 = sku_stats.sort_values(by=COL_QUANTITY, ascending=True).head(3).copy()
+                if total_q_current > 0:
+                    bottom_3['נתח שוק (%)'] = (bottom_3[COL_QUANTITY] / total_q_current * 100).round(1).astype(str) + '%'
+                bottom_3 = bottom_3.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
+                st.dataframe(bottom_3, hide_index=True, use_container_width=True)
+
+    else:
+        st.warning("אין מספיק נתונים לחישוב סטטיסטיקות")
 
     st.markdown("---")
 
