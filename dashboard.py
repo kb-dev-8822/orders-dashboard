@@ -43,30 +43,52 @@ def load_data():
 try:
     df = load_data()
     
-    # 3. סרגל צד לסינונים
+# 3. סרגל צד לסינונים
     st.sidebar.header("🔍 סינון נתונים")
     
-    # סינון לפי תאריכים
+    # בדיקה שיש עמודת תאריך והיא תקינה
     if 'תאריך' in df.columns:
-        min_date = df['תאריך'].min()
-        max_date = df['תאריך'].max()
+        # המרה בטוחה לתאריך (ללא שעה) לצורך ה-Widget
+        df['date_only'] = df['תאריך'].dt.date
         
-        # מוודא שיש תאריכים תקינים
+        min_date = df['date_only'].min()
+        max_date = df['date_only'].max()
+        
         if pd.notnull(min_date) and pd.notnull(max_date):
-            start_date, end_date = st.sidebar.date_input(
-                "בחר טווח תאריכים",
-                [min_date, max_date]
+            st.sidebar.subheader("📅 טווח תאריכים")
+            
+            # פיצול לשני שדות נפרדים - יותר אסתטי בסרגל צד
+            start_date = st.sidebar.date_input(
+                "מתאריך:",
+                value=min_date,
+                min_value=min_date,
+                max_value=max_date
             )
-            # סינון הדאטה
-            mask = (df['תאריך'].dt.date >= start_date) & (df['תאריך'].dt.date <= end_date)
-            df_filtered = df.loc[mask]
+            
+            end_date = st.sidebar.date_input(
+                "עד תאריך:",
+                value=max_date,
+                min_value=min_date,
+                max_value=max_date
+            )
+            
+            # בדיקת תקינות (שההתחלה לא אחרי הסוף)
+            if start_date > end_date:
+                st.sidebar.error("תאריך התחלה חייב להיות לפני תאריך סיום")
+                df_filtered = df # במקרה של שגיאה לא מסננים או שמציגים ריק
+            else:
+                # סינון הדאטה
+                mask = (df['date_only'] >= start_date) & (df['date_only'] <= end_date)
+                df_filtered = df.loc[mask]
         else:
             df_filtered = df
     else:
         df_filtered = df
 
     # חיפוש חופשי (לפי לקוח, מק"ט או כל דבר אחר)
-    search_term = st.sidebar.text_input("🔎 חיפוש חופשי (שם לקוח / פריט)")
+    st.sidebar.markdown("---") # קו מפריד
+    search_term = st.sidebar.text_input("🔎 חיפוש חופשי", placeholder="שם לקוח / פריט...")
+    
     if search_term:
         # מחפש את הטקסט בכל העמודות
         mask_search = df_filtered.astype(str).apply(lambda x: x.str.contains(search_term, case=False, na=False)).any(axis=1)
