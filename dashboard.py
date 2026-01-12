@@ -41,7 +41,6 @@ st.markdown("""
     [data-testid="stMetricLabel"] {
         text-align: right;
     }
-    /* עיצוב כפתור התחברות */
     .stButton button {
         width: 100%;
     }
@@ -50,8 +49,6 @@ st.markdown("""
 
 # --- מנגנון אבטחה (Login) ---
 def check_password():
-    """Returns `True` if the user had the correct password."""
-
     if "app_password" not in st.secrets:
         st.error("⚠️ לא הוגדרה סיסמה ב-Secrets. נא להוסיף 'app_password'.")
         return False
@@ -69,7 +66,6 @@ def check_password():
             "הזמן סיסמה", type="password", on_change=password_entered, key="password"
         )
         return False
-    
     elif not st.session_state["password_correct"]:
         st.markdown("### 🔒 התחברות למערכת")
         st.text_input(
@@ -77,7 +73,6 @@ def check_password():
         )
         st.error("❌ סיסמה שגויה")
         return False
-    
     else:
         return True
 
@@ -207,8 +202,8 @@ try:
     
     st.markdown("---")
 
-    # --- גרף מגמות (חדש!) ---
-    st.subheader("📈 פעילות לאורך זמן")
+    # --- גרף מגמות (משודרג: טאבים + עמודות) ---
+    st.subheader("📈 פעילות יומית")
     if 'date_only' in df_filtered.columns and not df_filtered.empty:
         # הקבצה לפי תאריך
         daily_data = df_filtered.groupby('date_only').agg({
@@ -216,7 +211,17 @@ try:
             COL_SKU: 'count'      # מספר שורות (הזמנות/פריטים)
         }).rename(columns={COL_QUANTITY: 'חבילות', COL_SKU: 'מספר שורות'})
         
-        st.line_chart(daily_data, height=300)
+        # שימוש בטאבים כדי לא להעמיס וכדי למנוע בלאגן בגרף
+        tab1, tab2 = st.tabs(["📊 כמות חבילות", "📝 מספר הזמנות"])
+        
+        with tab1:
+            st.caption("כמות החבילות הכוללת לכל יום (גרף עמודות)")
+            st.bar_chart(daily_data['חבילות'], color="#2E86C1") # צבע כחול מקצועי
+            
+        with tab2:
+            st.caption("מספר הרשומות/הזמנות לכל יום (גרף קווי)")
+            st.line_chart(daily_data['מספר שורות'], color="#E74C3C") # צבע אדום מקצועי
+            
     else:
         st.info("אין מספיק נתונים להצגת גרף")
 
@@ -248,22 +253,18 @@ try:
                 count_cust = top_cust.max()
                 stat3.metric("👑 לקוח מוביל", f"{best_cust}", f"{count_cust} הזמנות")
 
-    # --- רשימת 5 המק"טים המובילים (חדש!) ---
+    # --- רשימת 5 המק"טים המובילים ---
     with st.expander("🏆 5 המוצרים הנמכרים ביותר (לחץ לפירוט)", expanded=False):
         if COL_SKU in df_filtered.columns and COL_QUANTITY in df_filtered.columns:
             # קיבוץ לפי מק"ט וסיכום כמויות
             sku_stats = df_filtered.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index()
-            # מיון מהגדול לקטן ולקחת 5 עליונים
             sku_stats = sku_stats.sort_values(by=COL_QUANTITY, ascending=False).head(5)
             
-            # חישוב אחוזים
             total_q = df_filtered[COL_QUANTITY].sum()
             if total_q > 0:
                 sku_stats['נתח שוק (%)'] = (sku_stats[COL_QUANTITY] / total_q * 100).round(1).astype(str) + '%'
             
-            # שינוי שמות עמודות לתצוגה יפה
             sku_stats = sku_stats.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'סה"כ חבילות שנמכרו'})
-            
             st.dataframe(sku_stats, hide_index=True, use_container_width=True)
         else:
             st.warning("חסרים נתונים לחישוב מק\"טים מובילים")
