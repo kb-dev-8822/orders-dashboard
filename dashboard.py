@@ -16,15 +16,15 @@ COL_DATE = 'תאריך'
 COL_SHIP_NUM = 'מספר משלוח'
 # ==========================================
 
-# 1. הגדרת עמוד
+# 1. הגדרת עמוד (חייב להיות ראשון)
 st.set_page_config(
     page_title="דשבורד הזמנות",
-    page_icon="📦",
+    page_icon="🔒",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# הזרקת CSS
+# הזרקת CSS (כולל עיצוב למסך כניסה)
 st.markdown("""
 <style>
     .stApp {
@@ -41,10 +41,61 @@ st.markdown("""
     [data-testid="stMetricLabel"] {
         text-align: right;
     }
+    /* עיצוב כפתור התחברות */
+    .stButton button {
+        width: 100%;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# --- פונקציית הקסם לנרמול טלפונים ---
+# --- מנגנון אבטחה (Login) ---
+def check_password():
+    """Returns `True` if the user had the correct password."""
+
+    # בדיקה אם הסיסמה מוגדרת ב-Secrets
+    if "app_password" not in st.secrets:
+        st.error("⚠️ לא הוגדרה סיסמה ב-Secrets. נא להוסיף 'app_password'.")
+        return False
+
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if st.session_state["password"] == st.secrets["app_password"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # מחיקת הסיסמה מהזיכרון
+        else:
+            st.session_state["password_correct"] = False
+
+    # אתחול Session State
+    if "password_correct" not in st.session_state:
+        # הצגה ראשונית של שדה הסיסמה
+        st.markdown("### 🔒 התחברות למערכת")
+        st.text_input(
+            "הזמן סיסמה", type="password", on_change=password_entered, key="password"
+        )
+        return False
+    
+    elif not st.session_state["password_correct"]:
+        # סיסמה שגויה
+        st.markdown("### 🔒 התחברות למערכת")
+        st.text_input(
+            "הזמן סיסמה", type="password", on_change=password_entered, key="password"
+        )
+        st.error("❌ סיסמה שגויה")
+        return False
+    
+    else:
+        # סיסמה נכונה
+        return True
+
+# אם הסיסמה לא נכונה - עוצרים את הקוד כאן!
+if not check_password():
+    st.stop()
+
+# ========================================================
+# מכאן והלאה - הקוד של הדשבורד (רץ רק אחרי התחברות)
+# ========================================================
+
+# פונקציה לניקוי מספר טלפון
 def normalize_phone_str(phone_val):
     if pd.isna(phone_val) or phone_val == "":
         return ""
@@ -117,7 +168,6 @@ try:
     st.sidebar.header("🔎 חיפוש מתקדם")
     st.sidebar.info("החיפוש מתבצע בתוך טווח התאריכים שנבחר למעלה")
     
-    # הסרתי את האופציה "חופשי"
     search_options = {
         "מספר הזמנה": COL_ORDER_NUM,
         "מק\"ט": COL_SKU,
@@ -128,20 +178,17 @@ try:
     search_type_label = st.sidebar.selectbox("חפש לפי:", list(search_options.keys()))
     selected_col = search_options[search_type_label]
     
-    # placeholder דינמי שמשתנה לפי מה שבחרת
     placeholder_text = f"הקלד {search_type_label}..."
     search_term = st.sidebar.text_input("ערך לחיפוש:", placeholder=placeholder_text)
 
     if search_term:
         if selected_col == COL_PHONE:
-            # נרמול בחיפוש טלפון
             clean_input = normalize_phone_str(search_term)
             st.sidebar.caption(f"מחפש מספר מנורמל: {clean_input}")
             mask = df_filtered[COL_PHONE].astype(str).str.contains(clean_input, na=False)
             df_filtered = df_filtered[mask]
 
         elif selected_col in df_filtered.columns:
-            # חיפוש רגיל בעמודה הנבחרת
             mask = df_filtered[selected_col].astype(str).str.contains(search_term, case=False, na=False)
             df_filtered = df_filtered[mask]
         else:
