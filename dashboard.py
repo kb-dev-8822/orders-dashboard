@@ -155,9 +155,10 @@ try:
     st.sidebar.header("🔎 חיפוש מתקדם")
     st.sidebar.info("החיפוש מתבצע בתוך טווח התאריכים שנבחר למעלה")
     
+    # שינוי סדר: מק"ט ראשון
     search_options = {
-        "מספר הזמנה": COL_ORDER_NUM,
         "מק\"ט": COL_SKU,
+        "מספר הזמנה": COL_ORDER_NUM,
         "שם לקוח": COL_CUSTOMER,
         "טלפון": COL_PHONE
     }
@@ -202,32 +203,7 @@ try:
     
     st.markdown("---")
 
-    # --- גרף מגמות (משודרג: טאבים + עמודות) ---
-    st.subheader("📈 פעילות יומית")
-    if 'date_only' in df_filtered.columns and not df_filtered.empty:
-        # הקבצה לפי תאריך
-        daily_data = df_filtered.groupby('date_only').agg({
-            COL_QUANTITY: 'sum',  # סכום חבילות
-            COL_SKU: 'count'      # מספר שורות (הזמנות/פריטים)
-        }).rename(columns={COL_QUANTITY: 'חבילות', COL_SKU: 'מספר שורות'})
-        
-        # שימוש בטאבים כדי לא להעמיס וכדי למנוע בלאגן בגרף
-        tab1, tab2 = st.tabs(["📊 כמות חבילות", "📝 מספר הזמנות"])
-        
-        with tab1:
-            st.caption("כמות החבילות הכוללת לכל יום (גרף עמודות)")
-            st.bar_chart(daily_data['חבילות'], color="#2E86C1") # צבע כחול מקצועי
-            
-        with tab2:
-            st.caption("מספר הרשומות/הזמנות לכל יום (גרף קווי)")
-            st.line_chart(daily_data['מספר שורות'], color="#E74C3C") # צבע אדום מקצועי
-            
-    else:
-        st.info("אין מספיק נתונים להצגת גרף")
-
-    st.markdown("---")
-
-    # --- סטטיסטיקה מהירה ---
+    # --- סטטיסטיקה מהירה (הועבר למעלה) ---
     if not df_filtered.empty:
         stat1, stat2, stat3 = st.columns(3)
         
@@ -253,7 +229,7 @@ try:
                 count_cust = top_cust.max()
                 stat3.metric("👑 לקוח מוביל", f"{best_cust}", f"{count_cust} הזמנות")
 
-    # --- רשימת 5 המק"טים המובילים ---
+    # --- רשימת 5 המק"טים המובילים (הועבר למעלה) ---
     with st.expander("🏆 5 המוצרים הנמכרים ביותר (לחץ לפירוט)", expanded=False):
         if COL_SKU in df_filtered.columns and COL_QUANTITY in df_filtered.columns:
             # קיבוץ לפי מק"ט וסיכום כמויות
@@ -268,6 +244,31 @@ try:
             st.dataframe(sku_stats, hide_index=True, use_container_width=True)
         else:
             st.warning("חסרים נתונים לחישוב מק\"טים מובילים")
+
+    st.markdown("---")
+
+    # --- גרף מגמות (הורד למטה ושינוי סדר לשוניות) ---
+    st.subheader("📈 פעילות יומית")
+    if 'date_only' in df_filtered.columns and not df_filtered.empty:
+        # הקבצה לפי תאריך
+        daily_data = df_filtered.groupby('date_only').agg({
+            COL_QUANTITY: 'sum',  # סכום חבילות
+            COL_SKU: 'count'      # מספר שורות (הזמנות/פריטים)
+        }).rename(columns={COL_QUANTITY: 'חבילות', COL_SKU: 'מספר שורות'})
+        
+        # טאב ראשון: הזמנות, טאב שני: חבילות
+        tab1, tab2 = st.tabs(["📝 מספר הזמנות", "📊 כמות חבילות"])
+        
+        with tab1:
+            st.caption("מספר הרשומות/הזמנות לכל יום (גרף קווי)")
+            st.line_chart(daily_data['מספר שורות'], color="#E74C3C") # צבע אדום מקצועי
+
+        with tab2:
+            st.caption("כמות החבילות הכוללת לכל יום (גרף עמודות)")
+            st.bar_chart(daily_data['חבילות'], color="#2E86C1") # צבע כחול מקצועי
+            
+    else:
+        st.info("אין מספיק נתונים להצגת גרף")
 
     st.markdown("---")
 
