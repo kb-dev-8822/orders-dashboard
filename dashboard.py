@@ -21,10 +21,10 @@ st.set_page_config(
     page_title="דשבורד הזמנות",
     page_icon="📦",
     layout="wide",
-    initial_sidebar_state="collapsed" # סוגר את הבר הצדדי כברירת מחדל כדי לתת מקום
+    initial_sidebar_state="collapsed"
 )
 
-# הזרקת CSS ל-RTL ולעיצוב נקי יותר
+# הזרקת CSS
 st.markdown("""
 <style>
     .stApp {
@@ -34,7 +34,6 @@ st.markdown("""
     h1, h2, h3, p, div, .stMarkdown, .stRadio, .stSelectbox, .stTextInput {
         text-align: right;
     }
-    /* תיקון ליישור של המטריקות */
     [data-testid="stMetricValue"] {
         direction: ltr;
         text-align: right; 
@@ -42,23 +41,29 @@ st.markdown("""
     [data-testid="stMetricLabel"] {
         text-align: right;
     }
-    /* עיצוב לבר העליון של הפילטרים */
-    .filter-container {
-        background-color: #f0f2f6;
-        padding: 20px;
-        border-radius: 10px;
-        margin-bottom: 20px;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-# פונקציה לניקוי מספר טלפון
-def clean_phone_for_search(phone_input):
-    if not phone_input:
+# --- פונקציית הקסם לנרמול טלפונים ---
+def normalize_phone_str(phone_val):
+    """
+    מקבל כל דבר (מספר, טקסט עם מקפים וכו')
+    ומחזיר מחרוזת נקייה של ספרות בלבד ללא אפס מוביל
+    """
+    if pd.isna(phone_val) or phone_val == "":
         return ""
-    clean = re.sub(r'\D', '', str(phone_input))
+    
+    # המרה לטקסט
+    s = str(phone_val)
+    # ניקוי סיומת עשרונית אם יש (.0)
+    s = s.replace('.0', '')
+    # השארת ספרות בלבד (מעיף מקפים, רווחים, סוגריים וכו')
+    clean = re.sub(r'\D', '', s)
+    
+    # הסרת אפס מוביל אם יש
     if clean.startswith('0'):
         clean = clean[1:]
+        
     return clean
 
 @st.cache_data(ttl=600)
@@ -72,11 +77,16 @@ def load_data():
         df = df.dropna(subset=[COL_DATE])
         df['date_only'] = df[COL_DATE].dt.date
     
-    # המרות לטקסט
-    cols_to_str = [COL_PHONE, COL_SKU, COL_ORDER_NUM]
+    # המרות לטקסט ונרמול
+    cols_to_str = [COL_SKU, COL_ORDER_NUM]
     for col in cols_to_str:
         if col in df.columns:
             df[col] = df[col].astype(str).str.replace(r'\.0$', '', regex=True)
+
+    # נרמול אגרסיבי לעמודת הטלפון כבר בטעינה!
+    # אנחנו שומרים את הערך המנורמל בעמודה המקורית כדי שהחיפוש יעבוד חלק
+    if COL_PHONE in df.columns:
+        df[COL_PHONE] = df[COL_PHONE].apply(normalize_phone_str)
 
     # המרת כמות למספרים
     if COL_QUANTITY in df.columns:
@@ -88,48 +98,41 @@ try:
     df = load_data()
     df_filtered = df.copy()
 
-    # --- כותרת ראשית ---
+    # --- כותרת ופילטר עליון ---
     st.title("📦 דשבורד ניהול הזמנות")
 
-    # --- אזור סינון עליון (Top Bar) ---
-    # נשתמש ב-Container כדי לרכז את הסינונים למעלה
     with st.container():
         st.markdown("### 📅 סינון לפי תאריכים")
         
-        # חישוב תאריכי ברירת מחדל (חודש אחרון אם אין בחירה אחרת)
         default_end = datetime.now().date()
         default_start = default_end - timedelta(days=30)
         
-        # אם יש נתונים, ננסה לקחת את התאריכים מהקובץ כברירת מחדל, אבל לא ננעל את הלוח
+        # עדכון ברירת מחדל אם יש נתונים, אבל בלי לנעול גבולות
         if 'date_only' in df.columns and not df.empty:
             data_min = df['date_only'].min()
             data_max = df['date_only'].max()
-            # משתמשים בנתונים רק כברירת מחדל (Value), לא כגבול (Min/Max)
             if pd.notnull(data_min): default_start = data_min
             if pd.notnull(data_max): default_end = data_max
 
         col_filter1, col_filter2, col_spacer = st.columns([1, 1, 2])
         
         with col_filter1:
-            # הסרתי את min_value ו-max_value כדי לאפשר בחירה חופשית לחלוטין (כולל 2026)
             start_date = st.date_input("מתאריך:", value=default_start, format="DD/MM/YYYY")
-        
         with col_filter2:
             end_date = st.date_input("עד תאריך:", value=default_end, format="DD/MM/YYYY")
 
-        # ביצוע הסינון
         if start_date and end_date:
             if start_date <= end_date:
                 mask_date = (df['date_only'] >= start_date) & (df['date_only'] <= end_date)
                 df_filtered = df_filtered.loc[mask_date]
             else:
-                st.error("⚠️ שים לב: תאריך ההתחלה מאוחר מתאריך הסיום")
+                st.error("⚠️ תאריך התחלה מאוחר מתאריך סיום")
 
     st.markdown("---")
 
-    # --- סרגל צד (Sidebar) - נשאר רק לחיפוש ספציפי ---
+    # --- סרגל צד לחיפוש ---
     st.sidebar.header("🔎 חיפוש מתקדם")
-    st.sidebar.info("כאן אפשר לחפש הזמנה ספציפית בתוך הטווח שנבחר")
+    st.sidebar.info("החיפוש מתבצע בתוך טווח התאריכים שנבחר למעלה")
     
     search_options = {
         "חופשי": "all",
@@ -141,21 +144,33 @@ try:
     
     search_type_label = st.sidebar.selectbox("חפש לפי:", list(search_options.keys()))
     selected_col = search_options[search_type_label]
-    search_term = st.sidebar.text_input("הקלד לחיפוש:", placeholder="לדוגמה: 5077...")
+    search_term = st.sidebar.text_input("הקלד לחיפוש:", placeholder="לדוגמה: 050-12345...")
 
-    # לוגיקת החיפוש
     if search_term:
-        if selected_col == "all":
+        # לוגיקה ייחודית לכל סוג חיפוש
+        
+        if selected_col == COL_PHONE:
+            # 1. מנרמלים את מה שהמשתמש הקליד (מורידים מקפים, 0 וכו')
+            clean_input = normalize_phone_str(search_term)
+            st.sidebar.caption(f"מחפש מספר מנורמל: {clean_input}")
+            
+            # 2. מחפשים את המספר הנקי בתוך העמודה (שכבר ניקינו בטעינה)
+            # מכיוון ששני הצדדים נקיים, זה יעבוד מושלם
+            mask = df_filtered[COL_PHONE].astype(str).str.contains(clean_input, na=False)
+            df_filtered = df_filtered[mask]
+
+        elif selected_col == "all":
+            # חיפוש כללי
             mask = df_filtered.astype(str).apply(lambda x: x.str.contains(search_term, case=False, na=False)).any(axis=1)
             df_filtered = df_filtered[mask]
-        elif selected_col == COL_PHONE:
-            clean_input = clean_phone_for_search(search_term)
-            if clean_input:
-                mask = df_filtered[COL_PHONE].astype(str).str.contains(clean_input, na=False)
-                df_filtered = df_filtered[mask]
+
         elif selected_col in df_filtered.columns:
+            # חיפוש רגיל (מספר הזמנה, מקט, שם)
+            # case=False מבטיח התעלמות מאותיות גדולות/קטנות
             mask = df_filtered[selected_col].astype(str).str.contains(search_term, case=False, na=False)
             df_filtered = df_filtered[mask]
+        else:
+             st.sidebar.warning(f"העמודה '{selected_col}' לא נמצאה.")
 
     # --- מדדים (KPIs) ---
     total_rows = len(df_filtered)
@@ -190,8 +205,8 @@ try:
                 count_best = top_sku.max()
                 weakest_seller = top_sku.idxmin()
                 count_weak = top_sku.min()
-                stat1.metric("🌟 המק\"ט הכי נמכר", f"{best_seller}", f"{count_best} יחידות")
-                stat2.metric("🐢 המק\"ט הכי חלש", f"{weakest_seller}", f"{count_weak} יחידות")
+                stat1.metric("🌟 המק\"ט הכי נמכר", f"{best_seller}", f"{count_best}")
+                stat2.metric("🐢 המק\"ט הכי חלש", f"{weakest_seller}", f"{count_weak}")
             else:
                 stat1.metric("🌟 המק\"ט הכי נמכר", "-", "-")
                 stat2.metric("🐢 המק\"ט הכי חלש", "-", "-")
@@ -207,6 +222,7 @@ try:
     # --- טבלה ---
     st.subheader(f"רשימת הזמנות ({len(df_filtered)})")
     display_df = df_filtered.drop(columns=['date_only'], errors='ignore')
+    
     if COL_DATE in display_df.columns:
         display_df[COL_DATE] = display_df[COL_DATE].dt.strftime('%d/%m/%Y')
 
