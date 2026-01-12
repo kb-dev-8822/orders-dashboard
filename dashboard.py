@@ -46,24 +46,13 @@ st.markdown("""
 
 # --- פונקציית הקסם לנרמול טלפונים ---
 def normalize_phone_str(phone_val):
-    """
-    מקבל כל דבר (מספר, טקסט עם מקפים וכו')
-    ומחזיר מחרוזת נקייה של ספרות בלבד ללא אפס מוביל
-    """
     if pd.isna(phone_val) or phone_val == "":
         return ""
-    
-    # המרה לטקסט
     s = str(phone_val)
-    # ניקוי סיומת עשרונית אם יש (.0)
     s = s.replace('.0', '')
-    # השארת ספרות בלבד (מעיף מקפים, רווחים, סוגריים וכו')
     clean = re.sub(r'\D', '', s)
-    
-    # הסרת אפס מוביל אם יש
     if clean.startswith('0'):
         clean = clean[1:]
-        
     return clean
 
 @st.cache_data(ttl=600)
@@ -71,24 +60,19 @@ def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     df = conn.read()
     
-    # טיפול בתאריכים
     if COL_DATE in df.columns:
         df[COL_DATE] = pd.to_datetime(df[COL_DATE], dayfirst=True, errors='coerce')
         df = df.dropna(subset=[COL_DATE])
         df['date_only'] = df[COL_DATE].dt.date
     
-    # המרות לטקסט ונרמול
     cols_to_str = [COL_SKU, COL_ORDER_NUM]
     for col in cols_to_str:
         if col in df.columns:
             df[col] = df[col].astype(str).str.replace(r'\.0$', '', regex=True)
 
-    # נרמול אגרסיבי לעמודת הטלפון כבר בטעינה!
-    # אנחנו שומרים את הערך המנורמל בעמודה המקורית כדי שהחיפוש יעבוד חלק
     if COL_PHONE in df.columns:
         df[COL_PHONE] = df[COL_PHONE].apply(normalize_phone_str)
 
-    # המרת כמות למספרים
     if COL_QUANTITY in df.columns:
         df[COL_QUANTITY] = pd.to_numeric(df[COL_QUANTITY], errors='coerce').fillna(0)
 
@@ -107,7 +91,6 @@ try:
         default_end = datetime.now().date()
         default_start = default_end - timedelta(days=30)
         
-        # עדכון ברירת מחדל אם יש נתונים, אבל בלי לנעול גבולות
         if 'date_only' in df.columns and not df.empty:
             data_min = df['date_only'].min()
             data_max = df['date_only'].max()
@@ -134,8 +117,8 @@ try:
     st.sidebar.header("🔎 חיפוש מתקדם")
     st.sidebar.info("החיפוש מתבצע בתוך טווח התאריכים שנבחר למעלה")
     
+    # הסרתי את האופציה "חופשי"
     search_options = {
-        "חופשי": "all",
         "מספר הזמנה": COL_ORDER_NUM,
         "מק\"ט": COL_SKU,
         "שם לקוח": COL_CUSTOMER,
@@ -144,29 +127,21 @@ try:
     
     search_type_label = st.sidebar.selectbox("חפש לפי:", list(search_options.keys()))
     selected_col = search_options[search_type_label]
-    search_term = st.sidebar.text_input("הקלד לחיפוש:", placeholder="לדוגמה: 050-12345...")
+    
+    # placeholder דינמי שמשתנה לפי מה שבחרת
+    placeholder_text = f"הקלד {search_type_label}..."
+    search_term = st.sidebar.text_input("ערך לחיפוש:", placeholder=placeholder_text)
 
     if search_term:
-        # לוגיקה ייחודית לכל סוג חיפוש
-        
         if selected_col == COL_PHONE:
-            # 1. מנרמלים את מה שהמשתמש הקליד (מורידים מקפים, 0 וכו')
+            # נרמול בחיפוש טלפון
             clean_input = normalize_phone_str(search_term)
             st.sidebar.caption(f"מחפש מספר מנורמל: {clean_input}")
-            
-            # 2. מחפשים את המספר הנקי בתוך העמודה (שכבר ניקינו בטעינה)
-            # מכיוון ששני הצדדים נקיים, זה יעבוד מושלם
             mask = df_filtered[COL_PHONE].astype(str).str.contains(clean_input, na=False)
             df_filtered = df_filtered[mask]
 
-        elif selected_col == "all":
-            # חיפוש כללי
-            mask = df_filtered.astype(str).apply(lambda x: x.str.contains(search_term, case=False, na=False)).any(axis=1)
-            df_filtered = df_filtered[mask]
-
         elif selected_col in df_filtered.columns:
-            # חיפוש רגיל (מספר הזמנה, מקט, שם)
-            # case=False מבטיח התעלמות מאותיות גדולות/קטנות
+            # חיפוש רגיל בעמודה הנבחרת
             mask = df_filtered[selected_col].astype(str).str.contains(search_term, case=False, na=False)
             df_filtered = df_filtered[mask]
         else:
