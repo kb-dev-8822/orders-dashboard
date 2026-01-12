@@ -52,22 +52,18 @@ st.markdown("""
 def check_password():
     """Returns `True` if the user had the correct password."""
 
-    # בדיקה אם הסיסמה מוגדרת ב-Secrets
     if "app_password" not in st.secrets:
         st.error("⚠️ לא הוגדרה סיסמה ב-Secrets. נא להוסיף 'app_password'.")
         return False
 
     def password_entered():
-        """Checks whether a password entered by the user is correct."""
         if st.session_state["password"] == st.secrets["app_password"]:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # מחיקת הסיסמה מהזיכרון
+            del st.session_state["password"]  
         else:
             st.session_state["password_correct"] = False
 
-    # אתחול Session State
     if "password_correct" not in st.session_state:
-        # הצגה ראשונית של שדה הסיסמה
         st.markdown("### 🔒 התחברות למערכת")
         st.text_input(
             "הזמן סיסמה", type="password", on_change=password_entered, key="password"
@@ -75,7 +71,6 @@ def check_password():
         return False
     
     elif not st.session_state["password_correct"]:
-        # סיסמה שגויה
         st.markdown("### 🔒 התחברות למערכת")
         st.text_input(
             "הזמן סיסמה", type="password", on_change=password_entered, key="password"
@@ -84,18 +79,15 @@ def check_password():
         return False
     
     else:
-        # סיסמה נכונה
         return True
 
-# אם הסיסמה לא נכונה - עוצרים את הקוד כאן!
 if not check_password():
     st.stop()
 
 # ========================================================
-# מכאן והלאה - הקוד של הדשבורד (רץ רק אחרי התחברות)
+# מכאן והלאה - הקוד של הדשבורד
 # ========================================================
 
-# פונקציה לניקוי מספר טלפון
 def normalize_phone_str(phone_val):
     if pd.isna(phone_val) or phone_val == "":
         return ""
@@ -194,7 +186,7 @@ try:
         else:
              st.sidebar.warning(f"העמודה '{selected_col}' לא נמצאה.")
 
-    # --- מדדים (KPIs) ---
+    # --- מדדים ראשיים (KPIs) ---
     total_rows = len(df_filtered)
     if COL_SHIP_NUM in df_filtered.columns:
         installs = df_filtered[COL_SHIP_NUM].isna().sum()
@@ -213,13 +205,28 @@ try:
     kpi3.metric("🚛 הזמנות רגילות", regular)
     kpi4.metric("🛠️ התקנות", installs)
     
-    st.divider()
+    st.markdown("---")
 
-    # --- סטטיסטיקה ---
+    # --- גרף מגמות (חדש!) ---
+    st.subheader("📈 פעילות לאורך זמן")
+    if 'date_only' in df_filtered.columns and not df_filtered.empty:
+        # הקבצה לפי תאריך
+        daily_data = df_filtered.groupby('date_only').agg({
+            COL_QUANTITY: 'sum',  # סכום חבילות
+            COL_SKU: 'count'      # מספר שורות (הזמנות/פריטים)
+        }).rename(columns={COL_QUANTITY: 'חבילות', COL_SKU: 'מספר שורות'})
+        
+        st.line_chart(daily_data, height=300)
+    else:
+        st.info("אין מספיק נתונים להצגת גרף")
+
+    st.markdown("---")
+
+    # --- סטטיסטיקה מהירה ---
     if not df_filtered.empty:
         stat1, stat2, stat3 = st.columns(3)
         
-        # מק"ט
+        # מק"ט מוביל
         if COL_SKU in df_filtered.columns:
             top_sku = df_filtered[COL_SKU].value_counts()
             if not top_sku.empty:
@@ -227,13 +234,13 @@ try:
                 count_best = top_sku.max()
                 weakest_seller = top_sku.idxmin()
                 count_weak = top_sku.min()
-                stat1.metric("🌟 המק\"ט הכי נמכר", f"{best_seller}", f"{count_best}")
-                stat2.metric("🐢 המק\"ט הכי חלש", f"{weakest_seller}", f"{count_weak}")
+                stat1.metric("🌟 המק\"ט הכי נמכר", f"{best_seller}", f"{count_best} פעמים")
+                stat2.metric("🐢 המק\"ט הכי חלש", f"{weakest_seller}", f"{count_weak} פעמים")
             else:
                 stat1.metric("🌟 המק\"ט הכי נמכר", "-", "-")
                 stat2.metric("🐢 המק\"ט הכי חלש", "-", "-")
         
-        # לקוח
+        # לקוח מוביל
         if COL_CUSTOMER in df_filtered.columns:
             top_cust = df_filtered[COL_CUSTOMER].value_counts()
             if not top_cust.empty:
@@ -241,8 +248,30 @@ try:
                 count_cust = top_cust.max()
                 stat3.metric("👑 לקוח מוביל", f"{best_cust}", f"{count_cust} הזמנות")
 
-    # --- טבלה ---
-    st.subheader(f"רשימת הזמנות ({len(df_filtered)})")
+    # --- רשימת 5 המק"טים המובילים (חדש!) ---
+    with st.expander("🏆 5 המוצרים הנמכרים ביותר (לחץ לפירוט)", expanded=False):
+        if COL_SKU in df_filtered.columns and COL_QUANTITY in df_filtered.columns:
+            # קיבוץ לפי מק"ט וסיכום כמויות
+            sku_stats = df_filtered.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index()
+            # מיון מהגדול לקטן ולקחת 5 עליונים
+            sku_stats = sku_stats.sort_values(by=COL_QUANTITY, ascending=False).head(5)
+            
+            # חישוב אחוזים
+            total_q = df_filtered[COL_QUANTITY].sum()
+            if total_q > 0:
+                sku_stats['נתח שוק (%)'] = (sku_stats[COL_QUANTITY] / total_q * 100).round(1).astype(str) + '%'
+            
+            # שינוי שמות עמודות לתצוגה יפה
+            sku_stats = sku_stats.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'סה"כ חבילות שנמכרו'})
+            
+            st.dataframe(sku_stats, hide_index=True, use_container_width=True)
+        else:
+            st.warning("חסרים נתונים לחישוב מק\"טים מובילים")
+
+    st.markdown("---")
+
+    # --- טבלה ראשית ---
+    st.subheader(f"רשימת הזמנות מלאה ({len(df_filtered)})")
     display_df = df_filtered.drop(columns=['date_only'], errors='ignore')
     
     if COL_DATE in display_df.columns:
