@@ -41,36 +41,41 @@ def load_data():
     # קריאת הנתונים - מושך הכל
     df = conn.read()
     
-    # המרת עמודת התאריך לתאריך אמיתי של פייתון
-    # dayfirst=True חשוב כי הפורמט שלנו הוא יום/חודש/שנה
+    # --- התיקון הקריטי לשגיאת ה-Float ---
     if 'תאריך' in df.columns:
+        # המרה לתאריך (מה שלא מצליח הופך ל-NaT)
+        # dayfirst=True חשוב כי הפורמט שלנו הוא יום/חודש/שנה
         df['תאריך'] = pd.to_datetime(df['תאריך'], dayfirst=True, errors='coerce')
+        
+        # מחיקת שורות שאין בהן תאריך תקין (שורות ריקות בשיטס)
+        df = df.dropna(subset=['תאריך'])
+        
+        # יצירת עמודת עזר לתאריך בלבד (ללא שעה)
+        df['date_only'] = df['תאריך'].dt.date
     
     return df
 
 try:
     df = load_data()
     
-    # יצירת עמודת עזר לתאריך בלבד (ללא שעה) לצורך הסינון
-    if 'תאריך' in df.columns:
-        df['date_only'] = df['תאריך'].dt.date
+    # יצירת עותק לסינון
+    df_filtered = df.copy()
 
     # --- סרגל צד (Sidebar) ---
     st.sidebar.header("🔍 סינון וחיפוש")
     
-    df_filtered = df.copy()
-
-    # סינון לפי תאריכים
-    if 'date_only' in df.columns:
+    # סינון לפי תאריכים - רק אם הטבלה לא ריקה ויש עמודת תאריך
+    if 'date_only' in df.columns and not df.empty:
         # מציאת תאריך מינימום ומקסימום מהקובץ
         min_date = df['date_only'].min()
         max_date = df['date_only'].max()
         
+        # וידוא שהתאריכים תקינים (לא NaT/NaN)
         if pd.notnull(min_date) and pd.notnull(max_date):
             st.sidebar.subheader("📅 טווח תאריכים")
             
             # פיצול לשני שדות נפרדים למראה נקי יותר
-            col_date1, col_date2 = st.sidebar.columns(2) # אפשר גם אחד מתחת לשני, כאן שמתי בטורים צפופים או אחד מתחת לשני
+            col_date1, col_date2 = st.sidebar.columns(2) 
             
             start_date = st.sidebar.date_input(
                 "מתאריך:",
