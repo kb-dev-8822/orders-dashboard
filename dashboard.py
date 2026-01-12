@@ -24,7 +24,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# הזרקת CSS (כולל עיצוב למסך כניסה)
+# הזרקת CSS
 st.markdown("""
 <style>
     .stApp {
@@ -155,7 +155,6 @@ try:
     st.sidebar.header("🔎 חיפוש מתקדם")
     st.sidebar.info("החיפוש מתבצע בתוך טווח התאריכים שנבחר למעלה")
     
-    # שינוי סדר: מק"ט ראשון
     search_options = {
         "מק\"ט": COL_SKU,
         "מספר הזמנה": COL_ORDER_NUM,
@@ -203,25 +202,31 @@ try:
     
     st.markdown("---")
 
-    # --- סטטיסטיקה מהירה (הועבר למעלה) ---
+    # --- סטטיסטיקה מהירה (עודכן לחישוב לפי כמות ולא לפי שורות) ---
     if not df_filtered.empty:
         stat1, stat2, stat3 = st.columns(3)
         
-        # מק"ט מוביל
-        if COL_SKU in df_filtered.columns:
-            top_sku = df_filtered[COL_SKU].value_counts()
-            if not top_sku.empty:
-                best_seller = top_sku.idxmax()
-                count_best = top_sku.max()
-                weakest_seller = top_sku.idxmin()
-                count_weak = top_sku.min()
-                stat1.metric("🌟 המק\"ט הכי נמכר", f"{best_seller}", f"{count_best} פעמים")
-                stat2.metric("🐢 המק\"ט הכי חלש", f"{weakest_seller}", f"{count_weak} פעמים")
+        # מק"ט מוביל (לפי כמות!)
+        if COL_SKU in df_filtered.columns and COL_QUANTITY in df_filtered.columns:
+            # מקבצים לפי מק"ט וסוכמים את הכמויות
+            sku_quantity_sums = df_filtered.groupby(COL_SKU)[COL_QUANTITY].sum()
+            
+            if not sku_quantity_sums.empty:
+                # הכי נמכר
+                best_seller = sku_quantity_sums.idxmax()
+                count_best = int(sku_quantity_sums.max())
+                
+                # הכי חלש
+                weakest_seller = sku_quantity_sums.idxmin()
+                count_weak = int(sku_quantity_sums.min())
+                
+                stat1.metric("🌟 המק\"ט הכי נמכר", f"{best_seller}", f"{count_best} יחידות")
+                stat2.metric("🐢 המק\"ט הכי חלש", f"{weakest_seller}", f"{count_weak} יחידות")
             else:
                 stat1.metric("🌟 המק\"ט הכי נמכר", "-", "-")
                 stat2.metric("🐢 המק\"ט הכי חלש", "-", "-")
         
-        # לקוח מוביל
+        # לקוח מוביל (נשאר לפי מספר הזמנות כי זה הגיוני יותר ללקוח)
         if COL_CUSTOMER in df_filtered.columns:
             top_cust = df_filtered[COL_CUSTOMER].value_counts()
             if not top_cust.empty:
@@ -229,7 +234,7 @@ try:
                 count_cust = top_cust.max()
                 stat3.metric("👑 לקוח מוביל", f"{best_cust}", f"{count_cust} הזמנות")
 
-    # --- רשימת 5 המק"טים המובילים (הועבר למעלה) ---
+    # --- רשימת 5 המק"טים המובילים ---
     with st.expander("🏆 5 המוצרים הנמכרים ביותר (לחץ לפירוט)", expanded=False):
         if COL_SKU in df_filtered.columns and COL_QUANTITY in df_filtered.columns:
             # קיבוץ לפי מק"ט וסיכום כמויות
@@ -247,7 +252,7 @@ try:
 
     st.markdown("---")
 
-    # --- גרף מגמות (הורד למטה ושינוי סדר לשוניות) ---
+    # --- גרף מגמות ---
     st.subheader("📈 פעילות יומית")
     if 'date_only' in df_filtered.columns and not df_filtered.empty:
         # הקבצה לפי תאריך
@@ -256,16 +261,15 @@ try:
             COL_SKU: 'count'      # מספר שורות (הזמנות/פריטים)
         }).rename(columns={COL_QUANTITY: 'חבילות', COL_SKU: 'מספר שורות'})
         
-        # טאב ראשון: הזמנות, טאב שני: חבילות
         tab1, tab2 = st.tabs(["📝 מספר הזמנות", "📊 כמות חבילות"])
         
         with tab1:
             st.caption("מספר הרשומות/הזמנות לכל יום (גרף קווי)")
-            st.line_chart(daily_data['מספר שורות'], color="#E74C3C") # צבע אדום מקצועי
+            st.line_chart(daily_data['מספר שורות'], color="#E74C3C") 
 
         with tab2:
             st.caption("כמות החבילות הכוללת לכל יום (גרף עמודות)")
-            st.bar_chart(daily_data['חבילות'], color="#2E86C1") # צבע כחול מקצועי
+            st.bar_chart(daily_data['חבילות'], color="#2E86C1") 
             
     else:
         st.info("אין מספיק נתונים להצגת גרף")
