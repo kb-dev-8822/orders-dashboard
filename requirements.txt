@@ -1,3 +1,4 @@
 streamlit
 pandas
-st-gsheets-connection
+psycopg2-binary
+openpyxl
