@@ -4,12 +4,14 @@ import psycopg2
 import re
 from datetime import datetime, timedelta
 
-# 1. הגדרת עמוד (חייב להיות ראשון)
+# ==========================================
+# 1. הגדרות עמוד (השינוי כאן: expanded)
+# ==========================================
 st.set_page_config(
     page_title="דשבורד הזמנות",
     page_icon="📦",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"  # <--- הנה התיקון: הסרגל יהיה פתוח תמיד
 )
 
 # ==========================================
@@ -58,6 +60,10 @@ st.markdown("""
     }
     .stButton button {
         width: 100%;
+    }
+    /* קיבוע סרגל הצד לימין (לא חובה אבל עוזר בעברית) */
+    section[data-testid="stSidebar"] {
+        direction: rtl;
     }
 </style>
 """, unsafe_allow_html=True)
