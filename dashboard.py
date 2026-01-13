@@ -5,13 +5,13 @@ import re
 from datetime import datetime, timedelta
 
 # ==========================================
-# 1. הגדרות עמוד (השינוי כאן: expanded)
+# 1. הגדרות עמוד
 # ==========================================
 st.set_page_config(
     page_title="דשבורד הזמנות",
     page_icon="📦",
     layout="wide",
-    initial_sidebar_state="expanded"  # <--- הנה התיקון: הסרגל יהיה פתוח תמיד
+    initial_sidebar_state="expanded"  # סרגל צד פתוח תמיד
 )
 
 # ==========================================
@@ -41,9 +41,12 @@ COL_CITY = 'עיר'
 COL_STREET = 'רחוב'
 COL_HOUSE = 'מספר בית'
 
-# הזרקת CSS
+# ==========================================
+# 🎨 CSS להעלמת כפתור הסגירה (ה"נעילה") ועיצוב RTL
+# ==========================================
 st.markdown("""
 <style>
+    /* כיוון ימין-שמאל כללי */
     .stApp {
         direction: rtl;
         text-align: right;
@@ -61,7 +64,14 @@ st.markdown("""
     .stButton button {
         width: 100%;
     }
-    /* קיבוע סרגל הצד לימין (לא חובה אבל עוזר בעברית) */
+    
+    /* --- קוד הנעילה של הסרגל --- */
+    [data-testid="stSidebarCollapsedControl"] {
+        display: none !important;
+    }
+    section[data-testid="stSidebar"] > div > div:first-child button {
+        display: none !important;
+    }
     section[data-testid="stSidebar"] {
         direction: rtl;
     }
@@ -172,6 +182,21 @@ def load_data_from_sql():
 
         if COL_QUANTITY in df.columns:
             df[COL_QUANTITY] = pd.to_numeric(df[COL_QUANTITY], errors='coerce').fillna(0)
+
+        # ---------------------------------------------------------
+        #  ✨ כאן מתבצע הניקוי החכם של המק"טים (Normalization) ✨
+        # ---------------------------------------------------------
+        if COL_SKU in df.columns:
+            # 1. המרה לאותיות גדולות (מטפל ב-White vs WHITE)
+            df[COL_SKU] = df[COL_SKU].astype(str).str.upper()
+            
+            # 2. החלפת לוכסנים ברווח (מטפל ב-WOOD/BLACK)
+            df[COL_SKU] = df[COL_SKU].str.replace('/', ' ', regex=False)
+            df[COL_SKU] = df[COL_SKU].str.replace('\\', ' ', regex=False)
+            
+            # 3. ניקוי רווחים כפולים ורווחים בקצוות
+            df[COL_SKU] = df[COL_SKU].str.replace(r'\s+', ' ', regex=True).str.strip()
+        # ---------------------------------------------------------
 
         return df
 
