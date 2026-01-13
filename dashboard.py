@@ -93,7 +93,8 @@ def normalize_phone_str(phone_val):
         clean = clean[1:]
     return clean
 
-@st.cache_data(ttl=600)
+# --- שינוי: הוסר ה-TTL כדי למנוע רענון אוטומטי ---
+@st.cache_data
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     df = conn.read()
@@ -117,6 +118,11 @@ def load_data():
     return df
 
 try:
+    # --- כפתור רענון יזום בסרגל הצד ---
+    if st.sidebar.button("🔄 רענן נתונים עכשיו"):
+        load_data.clear() # מנקה את הזיכרון
+        st.rerun()        # טוען מחדש את הדף
+
     df = load_data()
     
     # עותק בסיסי (לפני סינונים)
@@ -258,6 +264,7 @@ try:
     # --- גרף מגמות (הוזז למטה) ---
     st.subheader("📈 פעילות יומית")
     if 'date_only' in df_filtered.columns and not df_filtered.empty:
+        # הקבצה לפי תאריך
         daily_data = df_filtered.groupby('date_only').agg({
             COL_QUANTITY: 'sum',  # סכום חבילות
             COL_SKU: 'count'      # מספר שורות
