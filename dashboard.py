@@ -263,6 +263,17 @@ try:
     search_term = st.sidebar.text_input("ערך לחיפוש:", placeholder=placeholder_text)
 
     if search_term:
+        # --- תוספת: נרמול חכם לחיפוש מק"ט ---
+        if selected_col == COL_SKU:
+            # מבצעים בדיוק את אותו ניקוי שעשינו לנתונים בטעינה
+            search_term = search_term.upper()                # אותיות גדולות
+            search_term = search_term.replace('/', ' ')      # החלפת / ברווח
+            search_term = search_term.replace('\\', ' ')     # החלפת \ ברווח
+            search_term = re.sub(r'\s+', ' ', search_term).strip() # ניקוי רווחים כפולים
+            
+            st.sidebar.caption(f"🔎 מחפש בפועל: {search_term}")
+
+        # --- לוגיקה קיימת ---
         if selected_col == COL_PHONE:
             clean_input = normalize_phone_str(search_term)
             st.sidebar.caption(f"מחפש מספר מנורמל: {clean_input}")
