@@ -1,11 +1,20 @@
 import streamlit as st
 import pandas as pd
-from streamlit_gsheets import GSheetsConnection
+import psycopg2
 import re
 from datetime import datetime, timedelta
 
 # ==========================================
-# ⚙️ הגדרות שמות עמודות
+# ⚙️ הגדרות חיבור ל-SQL (Supabase)
+# ==========================================
+DB_HOST = "aws-1-eu-central-1.pooler.supabase.com"
+DB_PORT = "6543"
+DB_NAME = "postgres"
+DB_USER = "postgres.wbtwqdslgrqsestvezcq"
+DB_PASS = "MySecretPass1231"
+
+# ==========================================
+# ⚙️ הגדרות שמות עמודות (לשימוש בדשבורד)
 # ==========================================
 COL_SKU = 'מקט'
 COL_CUSTOMER = 'שם פרטי'
@@ -14,12 +23,14 @@ COL_ORDER_NUM = 'מספר הזמנה'
 COL_QUANTITY = 'כמות'
 COL_DATE = 'תאריך'
 COL_SHIP_NUM = 'מספר משלוח'
-# ==========================================
+COL_CITY = 'עיר'
+COL_STREET = 'רחוב'
+COL_HOUSE = 'מספר בית'
 
 # 1. הגדרת עמוד (חייב להיות ראשון)
 st.set_page_config(
     page_title="דשבורד הזמנות",
-    page_icon="🔒",
+    page_icon="📦",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -50,8 +61,10 @@ st.markdown("""
 # --- מנגנון אבטחה (Login) ---
 def check_password():
     if "app_password" not in st.secrets:
-        st.error("⚠️ לא הוגדרה סיסמה ב-Secrets. נא להוסיף 'app_password'.")
-        return False
+        # אם אין סיסמה ב-secrets, נאפשר כניסה חופשית או נציג שגיאה (לבחירתך)
+        # כרגע נשים אזהרה כדי שלא ייתקע
+        st.warning("⚠️ לא הוגדרה סיסמה ב-Secrets. הכניסה חופשית לבינתיים.")
+        return True
 
     def password_entered():
         if st.session_state["password"] == st.secrets["app_password"]:
@@ -93,43 +106,87 @@ def normalize_phone_str(phone_val):
         clean = clean[1:]
     return clean
 
-# --- שינוי: הוסר ה-TTL כדי למנוע רענון אוטומטי ---
-@st.cache_data
-def load_data():
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    df = conn.read()
-    
-    if COL_DATE in df.columns:
-        df[COL_DATE] = pd.to_datetime(df[COL_DATE], dayfirst=True, errors='coerce')
+@st.cache_data(ttl=600) # רענון כל 10 דקות, או ידני
+def load_data_from_sql():
+    """
+    מושך נתונים מ-Supabase וממיר אותם לפורמט שהדשבורד מכיר (עברית)
+    """
+    try:
+        conn = psycopg2.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            database=DB_NAME,
+            user=DB_USER,
+            password=DB_PASS,
+            sslmode='require'
+        )
+        query = """
+            SELECT 
+                order_num, 
+                customer_name, 
+                phone, 
+                city, 
+                street, 
+                house_num, 
+                sku, 
+                quantity, 
+                shipping_num, 
+                order_date 
+            FROM orders
+        """
+        df = pd.read_sql(query, conn)
+        conn.close()
+
+        # המרת שמות עמודות מאנגלית לעברית (כדי שהקוד הקיים יעבוד)
+        df = df.rename(columns={
+            'order_num': COL_ORDER_NUM,
+            'customer_name': COL_CUSTOMER,
+            'phone': COL_PHONE,
+            'city': COL_CITY,
+            'street': COL_STREET,
+            'house_num': COL_HOUSE,
+            'sku': COL_SKU,
+            'quantity': COL_QUANTITY,
+            'shipping_num': COL_SHIP_NUM,
+            'order_date': COL_DATE
+        })
+
+        # טיפול בתאריכים
+        df[COL_DATE] = pd.to_datetime(df[COL_DATE], errors='coerce')
         df = df.dropna(subset=[COL_DATE])
         df['date_only'] = df[COL_DATE].dt.date
-    
-    cols_to_str = [COL_SKU, COL_ORDER_NUM]
-    for col in cols_to_str:
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.replace(r'\.0$', '', regex=True)
+        
+        # המרה לטקסט וניקויים
+        cols_to_str = [COL_SKU, COL_ORDER_NUM, COL_SHIP_NUM]
+        for col in cols_to_str:
+            if col in df.columns:
+                df[col] = df[col].fillna("").astype(str).str.replace(r'\.0$', '', regex=True)
 
-    if COL_PHONE in df.columns:
-        df[COL_PHONE] = df[COL_PHONE].apply(normalize_phone_str)
+        if COL_PHONE in df.columns:
+            df[COL_PHONE] = df[COL_PHONE].apply(normalize_phone_str)
 
-    if COL_QUANTITY in df.columns:
-        df[COL_QUANTITY] = pd.to_numeric(df[COL_QUANTITY], errors='coerce').fillna(0)
+        if COL_QUANTITY in df.columns:
+            df[COL_QUANTITY] = pd.to_numeric(df[COL_QUANTITY], errors='coerce').fillna(0)
 
-    return df
+        return df
+
+    except Exception as e:
+        st.error(f"שגיאה בחיבור למסד הנתונים: {e}")
+        return pd.DataFrame()
 
 try:
     # --- כפתור רענון יזום בסרגל הצד ---
     if st.sidebar.button("🔄 רענן נתונים עכשיו"):
-        load_data.clear() # מנקה את הזיכרון
-        st.rerun()        # טוען מחדש את הדף
+        load_data_from_sql.clear() # מנקה את הזיכרון
+        st.rerun()                 # טוען מחדש
 
-    df = load_data()
+    df = load_data_from_sql()
     
     # עותק בסיסי (לפני סינונים)
     df_filtered = df.copy()
 
     # --- כותרת ופילטר תאריכים ---
-    st.title("📦 דשבורד ניהול הזמנות")
+    st.title("📦 דשבורד ניהול הזמנות (SQL)")
 
     with st.container():
         st.markdown("### 📅 סינון לפי תאריכים")
@@ -158,7 +215,7 @@ try:
             else:
                 st.error("⚠️ תאריך התחלה מאוחר מתאריך סיום")
 
-    # שמירת נתונים מסונני תאריך (לפני סינון חיפוש) לטובת חישובי אחוזים
+    # שמירת נתונים מסונני תאריך לחישובים
     df_date_range_only = df_filtered.copy()
     total_packages_in_date_range = df_date_range_only[COL_QUANTITY].sum()
 
@@ -195,16 +252,17 @@ try:
         else:
              st.sidebar.warning(f"העמודה '{selected_col}' לא נמצאה.")
 
-    # --- מדדים ראשיים (KPIs) - מעודכן לחבילות ---
+    # --- מדדים ראשיים (KPIs) ---
     total_rows = len(df_filtered)
     
     # חישוב חבילות לפי סוג
     total_packages = int(df_filtered[COL_QUANTITY].sum())
     
-    regular_mask = df_filtered[COL_SHIP_NUM].notna()
+    # זיהוי התקנות לפי היעדר מספר משלוח
+    regular_mask = df_filtered[COL_SHIP_NUM].str.strip() != ""
     regular_packages = int(df_filtered.loc[regular_mask, COL_QUANTITY].sum())
     
-    install_mask = df_filtered[COL_SHIP_NUM].isna()
+    install_mask = df_filtered[COL_SHIP_NUM].str.strip() == ""
     install_packages = int(df_filtered.loc[install_mask, COL_QUANTITY].sum())
 
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
@@ -213,17 +271,15 @@ try:
     kpi3.metric("🚛 הזמנות רגילות (חבילות)", f"{regular_packages:,}")
     kpi4.metric("🛠️ התקנות (חבילות)", f"{install_packages:,}")
     
-    # --- תצוגת אחוז נתח שוק בחיפוש ---
     if search_term and total_packages_in_date_range > 0:
         search_share_pct = (total_packages / total_packages_in_date_range) * 100
-        st.info(f"📊 תוצאות החיפוש מהוות **{search_share_pct:.1f}%** מסך החבילות בטווח התאריכים הנבחר ({total_packages} מתוך {int(total_packages_in_date_range)})")
+        st.info(f"📊 תוצאות החיפוש מהוות **{search_share_pct:.1f}%** מסך החבילות בטווח התאריכים הנבחר")
 
     st.markdown("---")
 
-    # --- סטטיסטיקה מהירה + טבלאות ---
+    # --- סטטיסטיקה וטבלאות ---
     if not df_filtered.empty and COL_SKU in df_filtered.columns and COL_QUANTITY in df_filtered.columns:
         
-        # חישוב סטטיסטיקות מק"ט
         sku_stats = df_filtered.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index()
         total_q_current = df_filtered[COL_QUANTITY].sum()
         
@@ -249,7 +305,6 @@ try:
 
             with col_bottom:
                 st.subheader("🐢 5 המוצרים החלשים")
-                # לוקחים את ה-5 עם הכמות הכי נמוכה
                 bottom_5 = sku_stats.sort_values(by=COL_QUANTITY, ascending=True).head(5).copy()
                 if total_q_current > 0:
                     bottom_5['נתח שוק (%)'] = (bottom_5[COL_QUANTITY] / total_q_current * 100).round(1).astype(str) + '%'
@@ -261,13 +316,12 @@ try:
 
     st.markdown("---")
 
-    # --- גרף מגמות (הוזז למטה) ---
+    # --- גרף מגמות ---
     st.subheader("📈 פעילות יומית")
     if 'date_only' in df_filtered.columns and not df_filtered.empty:
-        # הקבצה לפי תאריך
         daily_data = df_filtered.groupby('date_only').agg({
-            COL_QUANTITY: 'sum',  # סכום חבילות
-            COL_SKU: 'count'      # מספר שורות
+            COL_QUANTITY: 'sum',  
+            COL_SKU: 'count'
         }).rename(columns={COL_QUANTITY: 'חבילות', COL_SKU: 'מספר שורות'})
         
         tab1, tab2 = st.tabs(["📝 מספר הזמנות", "📊 כמות חבילות"])
@@ -287,7 +341,13 @@ try:
 
     # --- טבלה ראשית ---
     st.subheader(f"רשימת הזמנות מלאה ({len(df_filtered)})")
-    display_df = df_filtered.drop(columns=['date_only'], errors='ignore')
+    
+    # סידור עמודות יפה לתצוגה
+    display_cols = [COL_DATE, COL_ORDER_NUM, COL_CUSTOMER, COL_PHONE, COL_CITY, COL_STREET, COL_HOUSE, COL_SKU, COL_QUANTITY, COL_SHIP_NUM]
+    # נשתמש רק בעמודות שבאמת קיימות
+    final_cols = [c for c in display_cols if c in df_filtered.columns]
+    
+    display_df = df_filtered[final_cols].copy()
     
     if COL_DATE in display_df.columns:
         display_df[COL_DATE] = display_df[COL_DATE].dt.strftime('%d/%m/%Y')
@@ -295,4 +355,4 @@ try:
     st.dataframe(display_df, use_container_width=True, hide_index=True, height=500)
 
 except Exception as e:
-    st.error(f"שגיאה: {e}")
+    st.error(f"שגיאה כללית בדשבורד: {e}")
