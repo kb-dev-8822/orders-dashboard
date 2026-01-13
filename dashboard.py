@@ -4,17 +4,29 @@ import psycopg2
 import re
 from datetime import datetime, timedelta
 
-# ==========================================
-# ⚙️ הגדרות חיבור ל-SQL (Supabase)
-# ==========================================
-DB_HOST = "aws-1-eu-central-1.pooler.supabase.com"
-DB_PORT = "6543"
-DB_NAME = "postgres"
-DB_USER = "postgres.wbtwqdslgrqsestvezcq"
-DB_PASS = "MySecretPass1231"
+# 1. הגדרת עמוד (חייב להיות ראשון)
+st.set_page_config(
+    page_title="דשבורד הזמנות",
+    page_icon="📦",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
 # ==========================================
-# ⚙️ הגדרות שמות עמודות (לשימוש בדשבורד)
+# ⚙️ משיכת פרטי חיבור מהסודות (Secrets)
+# ==========================================
+try:
+    DB_HOST = st.secrets["supabase"]["DB_HOST"]
+    DB_PORT = st.secrets["supabase"]["DB_PORT"]
+    DB_NAME = st.secrets["supabase"]["DB_NAME"]
+    DB_USER = st.secrets["supabase"]["DB_USER"]
+    DB_PASS = st.secrets["supabase"]["DB_PASS"]
+except Exception:
+    st.error("❌ שגיאה: חסרים פרטי חיבור ל-Supabase בקובץ secrets.toml")
+    st.stop()
+
+# ==========================================
+# ⚙️ הגדרות שמות עמודות
 # ==========================================
 COL_SKU = 'מקט'
 COL_CUSTOMER = 'שם פרטי'
@@ -26,14 +38,6 @@ COL_SHIP_NUM = 'מספר משלוח'
 COL_CITY = 'עיר'
 COL_STREET = 'רחוב'
 COL_HOUSE = 'מספר בית'
-
-# 1. הגדרת עמוד (חייב להיות ראשון)
-st.set_page_config(
-    page_title="דשבורד הזמנות",
-    page_icon="📦",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
 
 # הזרקת CSS
 st.markdown("""
@@ -61,9 +65,7 @@ st.markdown("""
 # --- מנגנון אבטחה (Login) ---
 def check_password():
     if "app_password" not in st.secrets:
-        # אם אין סיסמה ב-secrets, נאפשר כניסה חופשית או נציג שגיאה (לבחירתך)
-        # כרגע נשים אזהרה כדי שלא ייתקע
-        st.warning("⚠️ לא הוגדרה סיסמה ב-Secrets. הכניסה חופשית לבינתיים.")
+        st.warning("⚠️ לא הוגדרה סיסמה ב-Secrets. הכניסה חופשית.")
         return True
 
     def password_entered():
@@ -106,11 +108,8 @@ def normalize_phone_str(phone_val):
         clean = clean[1:]
     return clean
 
-@st.cache_data(ttl=600) # רענון כל 10 דקות, או ידני
+@st.cache_data(ttl=600)
 def load_data_from_sql():
-    """
-    מושך נתונים מ-Supabase וממיר אותם לפורמט שהדשבורד מכיר (עברית)
-    """
     try:
         conn = psycopg2.connect(
             host=DB_HOST,
@@ -137,7 +136,7 @@ def load_data_from_sql():
         df = pd.read_sql(query, conn)
         conn.close()
 
-        # המרת שמות עמודות מאנגלית לעברית (כדי שהקוד הקיים יעבוד)
+        # המרה לעברית
         df = df.rename(columns={
             'order_num': COL_ORDER_NUM,
             'customer_name': COL_CUSTOMER,
@@ -156,7 +155,7 @@ def load_data_from_sql():
         df = df.dropna(subset=[COL_DATE])
         df['date_only'] = df[COL_DATE].dt.date
         
-        # המרה לטקסט וניקויים
+        # המרה לטקסט
         cols_to_str = [COL_SKU, COL_ORDER_NUM, COL_SHIP_NUM]
         for col in cols_to_str:
             if col in df.columns:
@@ -175,17 +174,14 @@ def load_data_from_sql():
         return pd.DataFrame()
 
 try:
-    # --- כפתור רענון יזום בסרגל הצד ---
     if st.sidebar.button("🔄 רענן נתונים עכשיו"):
-        load_data_from_sql.clear() # מנקה את הזיכרון
-        st.rerun()                 # טוען מחדש
+        load_data_from_sql.clear()
+        st.rerun()
 
     df = load_data_from_sql()
     
-    # עותק בסיסי (לפני סינונים)
     df_filtered = df.copy()
 
-    # --- כותרת ופילטר תאריכים ---
     st.title("📦 דשבורד ניהול הזמנות (SQL)")
 
     with st.container():
@@ -209,19 +205,16 @@ try:
 
         if start_date and end_date:
             if start_date <= end_date:
-                # סינון תאריכים
                 mask_date = (df['date_only'] >= start_date) & (df['date_only'] <= end_date)
                 df_filtered = df_filtered.loc[mask_date]
             else:
                 st.error("⚠️ תאריך התחלה מאוחר מתאריך סיום")
 
-    # שמירת נתונים מסונני תאריך לחישובים
     df_date_range_only = df_filtered.copy()
     total_packages_in_date_range = df_date_range_only[COL_QUANTITY].sum()
 
     st.markdown("---")
 
-    # --- סרגל צד לחיפוש ---
     st.sidebar.header("🔎 חיפוש מתקדם")
     st.sidebar.info("החיפוש מתבצע בתוך טווח התאריכים שנבחר למעלה")
     
@@ -238,7 +231,6 @@ try:
     placeholder_text = f"הקלד {search_type_label}..."
     search_term = st.sidebar.text_input("ערך לחיפוש:", placeholder=placeholder_text)
 
-    # ביצוע החיפוש בפועל
     if search_term:
         if selected_col == COL_PHONE:
             clean_input = normalize_phone_str(search_term)
@@ -252,13 +244,9 @@ try:
         else:
              st.sidebar.warning(f"העמודה '{selected_col}' לא נמצאה.")
 
-    # --- מדדים ראשיים (KPIs) ---
     total_rows = len(df_filtered)
-    
-    # חישוב חבילות לפי סוג
     total_packages = int(df_filtered[COL_QUANTITY].sum())
     
-    # זיהוי התקנות לפי היעדר מספר משלוח
     regular_mask = df_filtered[COL_SHIP_NUM].str.strip() != ""
     regular_packages = int(df_filtered.loc[regular_mask, COL_QUANTITY].sum())
     
@@ -277,14 +265,12 @@ try:
 
     st.markdown("---")
 
-    # --- סטטיסטיקה וטבלאות ---
     if not df_filtered.empty and COL_SKU in df_filtered.columns and COL_QUANTITY in df_filtered.columns:
         
         sku_stats = df_filtered.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index()
         total_q_current = df_filtered[COL_QUANTITY].sum()
         
         if not sku_stats.empty:
-            # מק"ט מוביל
             best_sku_row = sku_stats.loc[sku_stats[COL_QUANTITY].idxmax()]
             best_seller = best_sku_row[COL_SKU]
             count_best = int(best_sku_row[COL_QUANTITY])
@@ -316,7 +302,6 @@ try:
 
     st.markdown("---")
 
-    # --- גרף מגמות ---
     st.subheader("📈 פעילות יומית")
     if 'date_only' in df_filtered.columns and not df_filtered.empty:
         daily_data = df_filtered.groupby('date_only').agg({
@@ -339,12 +324,9 @@ try:
 
     st.markdown("---")
 
-    # --- טבלה ראשית ---
     st.subheader(f"רשימת הזמנות מלאה ({len(df_filtered)})")
     
-    # סידור עמודות יפה לתצוגה
     display_cols = [COL_DATE, COL_ORDER_NUM, COL_CUSTOMER, COL_PHONE, COL_CITY, COL_STREET, COL_HOUSE, COL_SKU, COL_QUANTITY, COL_SHIP_NUM]
-    # נשתמש רק בעמודות שבאמת קיימות
     final_cols = [c for c in display_cols if c in df_filtered.columns]
     
     display_df = df_filtered[final_cols].copy()
