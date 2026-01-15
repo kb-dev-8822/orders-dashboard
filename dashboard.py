@@ -376,7 +376,7 @@ with tab_dashboard:
     
     st.markdown("---")
 
-    # --- גרפים וסטטיסטיקות (Top 10 / Slow Movers Input) ---
+    # --- גרפים וסטטיסטיקות (טבלאות סימטריות) ---
     if not df_filtered.empty and COL_SKU in df_filtered.columns and COL_QUANTITY in df_filtered.columns:
         
         sku_stats = df_filtered.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index()
@@ -394,25 +394,29 @@ with tab_dashboard:
             
             col_top, col_bottom = st.columns(2)
             
-            # --- עמודה ימנית: 10 המוצרים המובילים ---
+            # --- עמודה ימנית: המוצרים המובילים (עם קלט סימטרי) ---
             with col_top:
-                st.subheader("🏆 10 המוצרים המובילים")
+                st.subheader("🏆 המוצרים המובילים")
                 
-                # --- תיקון: רווח מדויק עם גובה מוגדר בפיקסלים ---
-                # זה דוחף את הטבלה למטה כדי שתתחיל באותו קו עם הטבלה השנייה
-                st.markdown("<div style='height: 88px;'></div>", unsafe_allow_html=True)
+                # קלט לבחירת כמות מוצרים להצגה (במקום 10 קבוע)
+                top_n = st.number_input(
+                    "כמות להצגה (ברירת מחדל 10):", 
+                    min_value=1, 
+                    value=10, 
+                    step=1
+                )
                 
-                top_10 = sku_stats.sort_values(by=COL_QUANTITY, ascending=False).head(10).copy()
+                top_df = sku_stats.sort_values(by=COL_QUANTITY, ascending=False).head(top_n).copy()
                 if total_q_current > 0:
-                    top_10['נתח שוק (%)'] = (top_10[COL_QUANTITY] / total_q_current * 100).round(1).astype(str) + '%'
-                top_10 = top_10.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
-                st.dataframe(top_10, hide_index=True, use_container_width=True)
+                    top_df['נתח שוק (%)'] = (top_df[COL_QUANTITY] / total_q_current * 100).round(1).astype(str) + '%'
+                top_df = top_df.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
+                st.dataframe(top_df, hide_index=True, use_container_width=True)
 
-            # --- עמודה שמאלית: מוצרים איטיים ---
+            # --- עמודה שמאלית: מוצרים איטיים (עם קלט סימטרי) ---
             with col_bottom:
                 st.subheader("🐢 מוצרים איטיים / חלשים")
                 
-                # שדה הקלט (תופס גובה של כ-88 פיקסלים)
+                # קלט לבחירת סף המכירות
                 threshold = st.number_input(
                     "הצג מוצרים שנמכרו עד (כולל):", 
                     min_value=1, 
@@ -428,7 +432,7 @@ with tab_dashboard:
                 
                 slow_movers = slow_movers.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
                 
-                st.caption(f"נמצאו {len(slow_movers)} מוצרים שנמכרו {threshold} פעמים או פחות")
+                st.caption(f"נמצאו {len(slow_movers)} מוצרים")
                 st.dataframe(slow_movers, hide_index=True, use_container_width=True, height=300)
 
     st.markdown("---")
