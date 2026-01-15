@@ -376,7 +376,7 @@ with tab_dashboard:
     
     st.markdown("---")
 
-# --- גרפים וסטטיסטיקות (Top 10 / Slow Movers Input) ---
+    # --- גרפים וסטטיסטיקות (Top 10 / Slow Movers Input) ---
     if not df_filtered.empty and COL_SKU in df_filtered.columns and COL_QUANTITY in df_filtered.columns:
         
         sku_stats = df_filtered.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index()
@@ -398,9 +398,9 @@ with tab_dashboard:
             with col_top:
                 st.subheader("🏆 10 המוצרים המובילים")
                 
-                # תיקון סימטריה: מוסיפים רווח ריק כדי לאזן עם שדה הקלט בצד השני
-                st.write("") 
-                st.write("") 
+                # --- תיקון: רווח מדויק עם גובה מוגדר בפיקסלים ---
+                # זה דוחף את הטבלה למטה כדי שתתחיל באותו קו עם הטבלה השנייה
+                st.markdown("<div style='height: 88px;'></div>", unsafe_allow_html=True)
                 
                 top_10 = sku_stats.sort_values(by=COL_QUANTITY, ascending=False).head(10).copy()
                 if total_q_current > 0:
@@ -412,7 +412,7 @@ with tab_dashboard:
             with col_bottom:
                 st.subheader("🐢 מוצרים איטיים / חלשים")
                 
-                # שדה הקלט שגרם לחוסר הסימטריה
+                # שדה הקלט (תופס גובה של כ-88 פיקסלים)
                 threshold = st.number_input(
                     "הצג מוצרים שנמכרו עד (כולל):", 
                     min_value=1, 
