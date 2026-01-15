@@ -398,7 +398,7 @@ with tab_dashboard:
             with col_top:
                 st.subheader("🏆 המוצרים המובילים")
                 
-                # קלט לבחירת כמות מוצרים להצגה (במקום 10 קבוע)
+                # קלט לבחירת כמות מוצרים להצגה
                 top_n = st.number_input(
                     "כמות להצגה (ברירת מחדל 10):", 
                     min_value=1, 
@@ -416,9 +416,9 @@ with tab_dashboard:
             with col_bottom:
                 st.subheader("🐢 מוצרים איטיים / חלשים")
                 
-                # קלט לבחירת סף המכירות
+                # קלט לבחירת סף המכירות - תווית מעודכנת
                 threshold = st.number_input(
-                    "הצג מוצרים שנמכרו עד (כולל):", 
+                    "הצג מוצרים עם כמות חבילות עד (כולל):", 
                     min_value=1, 
                     value=3, 
                     step=1
@@ -432,8 +432,11 @@ with tab_dashboard:
                 
                 slow_movers = slow_movers.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
                 
-                st.caption(f"נמצאו {len(slow_movers)} מוצרים")
                 st.dataframe(slow_movers, hide_index=True, use_container_width=True, height=300)
+                
+                # הטקסט עבר לכאן - מתחת לטבלה
+                st.caption(f"נמצאו {len(slow_movers)} מוצרים")
+
 
     st.markdown("---")
 
