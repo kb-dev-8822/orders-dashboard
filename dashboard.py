@@ -19,7 +19,21 @@ st.set_page_config(
 )
 
 # ==========================================
-# 🎨 CSS עיצוב RTL והעלמת כפתורים מיותרים
+# ⚙️ הגדרות שמות עמודות
+# ==========================================
+COL_SKU = 'מקט'
+COL_CUSTOMER = 'שם פרטי'
+COL_PHONE = 'טלפון'
+COL_ORDER_NUM = 'מספר הזמנה'
+COL_QUANTITY = 'כמות'
+COL_DATE = 'תאריך'
+COL_SHIP_NUM = 'מספר משלוח'
+COL_CITY = 'עיר'
+COL_STREET = 'רחוב'
+COL_HOUSE = 'מספר בית'
+
+# ==========================================
+# 🎨 CSS
 # ==========================================
 st.markdown("""
 <style>
@@ -32,14 +46,14 @@ st.markdown("""
     section[data-testid="stSidebar"] > div > div:first-child button { display: none !important; }
     section[data-testid="stSidebar"] { direction: rtl; }
     
-    /* עיצוב טבלאות */
+    /* עיצוב טבלאות - הסתרת אינדקס */
     thead tr th:first-child {display:none}
     tbody th {display:none}
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 🔐 מנגנון אבטחה (Login)
+# 🔐 מנגנון אבטחה
 # ==========================================
 def check_password():
     if "app_password" not in st.secrets:
@@ -68,37 +82,12 @@ if not check_password():
     st.stop()
 
 # ==========================================
-# ⚙️ הגדרות חיבורים ושדות
-# ==========================================
-try:
-    DB_HOST = st.secrets["supabase"]["DB_HOST"]
-    DB_PORT = st.secrets["supabase"]["DB_PORT"]
-    DB_NAME = st.secrets["supabase"]["DB_NAME"]
-    DB_USER = st.secrets["supabase"]["DB_USER"]
-    DB_PASS = st.secrets["supabase"]["DB_PASS"]
-except:
-    st.error("❌ שגיאה: חסרים פרטי חיבור ל-Supabase ב-secrets.toml")
-    st.stop()
-
-# עמודות
-COL_SKU = 'מקט'
-COL_CUSTOMER = 'שם פרטי'
-COL_PHONE = 'טלפון'
-COL_ORDER_NUM = 'מספר הזמנה'
-COL_QUANTITY = 'כמות'
-COL_DATE = 'תאריך'
-COL_SHIP_NUM = 'מספר משלוח'
-COL_CITY = 'עיר'
-COL_STREET = 'רחוב'
-COL_HOUSE = 'מספר בית'
-
-# ==========================================
-# 🛠️ פונקציות עזר
+# 🛠️ פונקציות עזר (כולל התיקון ל-0 מוביל)
 # ==========================================
 
-def normalize_phone_display(phone_val):
+def normalize_phone_str(phone_val):
     """
-    מוודא שהטלפון מוצג עם 0 מוביל
+    מתקן מספרי טלפון לתצוגה: מוסיף 0 בהתחלה אם חסר.
     """
     if pd.isna(phone_val) or str(phone_val).strip() == "":
         return ""
@@ -109,14 +98,14 @@ def normalize_phone_display(phone_val):
     if not clean:
         return ""
         
-    # אם חסר 0 בהתחלה - נוסיף אותו
+    # אם אין 0 בהתחלה - נוסיף אותו
     if not clean.startswith('0'):
         clean = '0' + clean
         
     return clean
 
 def clean_sku(val):
-    """נרמול מקטים להשוואה"""
+    """נרמול מקטים להשוואה חכמה"""
     if pd.isna(val): return ""
     val = str(val).upper()
     val = val.replace('/', ' ').replace('\\', ' ')
@@ -124,15 +113,19 @@ def clean_sku(val):
     return val
 
 # ==========================================
-# 📥 פונקציות טעינת נתונים
+# 📥 טעינת נתונים (SQL + Email)
 # ==========================================
 
 @st.cache_data(ttl=600)
-def load_orders_data():
-    """טעינת הזמנות מה-SQL"""
+def load_data_from_sql():
     try:
         conn = psycopg2.connect(
-            host=DB_HOST, port=DB_PORT, database=DB_NAME, user=DB_USER, password=DB_PASS, sslmode='require'
+            host=st.secrets["supabase"]["DB_HOST"],
+            port=st.secrets["supabase"]["DB_PORT"],
+            database=st.secrets["supabase"]["DB_NAME"],
+            user=st.secrets["supabase"]["DB_USER"],
+            password=st.secrets["supabase"]["DB_PASS"],
+            sslmode='require'
         )
         query = """
             SELECT order_num, customer_name, phone, city, street, house_num, sku, quantity, shipping_num, order_date 
@@ -153,24 +146,32 @@ def load_orders_data():
         df = df.dropna(subset=[COL_DATE])
         df['date_only'] = df[COL_DATE].dt.date
 
-        # Process Strings & Phone
-        df[COL_SKU] = df[COL_SKU].apply(clean_sku)
-        
-        # --- תיקון: שימוש בפונקציה החדשה שמוסיפה 0 ---
-        if COL_PHONE in df.columns:
-            df[COL_PHONE] = df[COL_PHONE].apply(normalize_phone_display)
-        # ---------------------------------------------
+        # Clean Strings
+        cols_to_str = [COL_SKU, COL_ORDER_NUM, COL_SHIP_NUM]
+        for col in cols_to_str:
+            if col in df.columns:
+                df[col] = df[col].fillna("").astype(str).str.replace(r'\.0$', '', regex=True)
 
-        # Process Quantity
-        df[COL_QUANTITY] = pd.to_numeric(df[COL_QUANTITY], errors='coerce').fillna(0)
+        # Phone Normalization (Adding leading 0)
+        if COL_PHONE in df.columns:
+            df[COL_PHONE] = df[COL_PHONE].apply(normalize_phone_str)
+
+        # Quantity
+        if COL_QUANTITY in df.columns:
+            df[COL_QUANTITY] = pd.to_numeric(df[COL_QUANTITY], errors='coerce').fillna(0)
+
+        # SKU Normalization (Smart Match)
+        if COL_SKU in df.columns:
+            df[COL_SKU] = df[COL_SKU].apply(clean_sku)
 
         return df
+
     except Exception as e:
-        st.error(f"שגיאה בטעינת הזמנות: {e}")
+        st.error(f"שגיאה בחיבור למסד הנתונים: {e}")
         return pd.DataFrame()
 
 def fetch_inventory_from_email():
-    """משיכת קובץ המלאי האחרון מהמייל (ללא שמירה לדיסק)"""
+    """משיכת קובץ המלאי האחרון מהמייל"""
     if "email" not in st.secrets:
         st.error("חסרים פרטי אימייל ב-secrets.toml")
         return None
@@ -189,7 +190,6 @@ def fetch_inventory_from_email():
         mail.login(EMAIL_USER, EMAIL_PASS)
         mail.select("inbox")
 
-        # חיפוש לפי שולחן
         status, messages = mail.search(None, f'FROM "{TARGET_SENDER}"')
         if not messages[0]:
             status_container.warning(f"לא נמצאו מיילים מ-{TARGET_SENDER}")
@@ -197,7 +197,6 @@ def fetch_inventory_from_email():
 
         email_ids = messages[0].split()
         
-        # עוברים על 10 המיילים האחרונים
         for eid in reversed(email_ids[-10:]):
             _, msg_data = mail.fetch(eid, "(RFC822)")
             for response_part in msg_data:
@@ -208,7 +207,6 @@ def fetch_inventory_from_email():
                         subject = subject.decode(encoding if encoding else "utf-8")
                     
                     if TARGET_SUBJECT in subject:
-                        # נמצא מייל מתאים - מחפשים את הקובץ
                         for part in msg.walk():
                             if part.get_content_maintype() == "multipart": continue
                             if part.get("Content-Disposition") is None: continue
@@ -225,11 +223,8 @@ def fetch_inventory_from_email():
                                     mail.close()
                                     mail.logout()
                                     
-                                    # עיבוד הקובץ בזיכרון
                                     try:
                                         excel_file = io.BytesIO(file_data)
-                                        
-                                        # מציאת שורת כותרת "פריט"
                                         df_temp = pd.read_excel(excel_file, header=None)
                                         header_row = -1
                                         for i, row in df_temp.iterrows():
@@ -239,11 +234,9 @@ def fetch_inventory_from_email():
                                         
                                         if header_row == -1: return None
                                         
-                                        # טעינת הנתונים האמיתיים
                                         excel_file.seek(0)
                                         df_inv = pd.read_excel(excel_file, header=header_row)
                                         
-                                        # PIVOT בזיכרון
                                         df_inv["כמות זמינה"] = pd.to_numeric(df_inv["כמות זמינה"], errors="coerce").fillna(0)
                                         pivot_inv = df_inv.groupby("פריט")["כמות זמינה"].sum().reset_index()
                                         pivot_inv.columns = [COL_SKU, "מלאי_נוכחי"]
@@ -264,149 +257,221 @@ def fetch_inventory_from_email():
         st.error(f"שגיאה בהתחברות למייל: {e}")
         return None
 
-
 # ==========================================
-# 🖥️ ממשק משתמש (UI)
+# 🖥️ ממשק ראשי
 # ==========================================
 
-# --- טעינת נתונים ראשונית ---
-df_orders = load_orders_data()
+# טעינת נתונים ראשונית
+df = load_data_from_sql()
 
 # --- סרגל צד ---
-st.sidebar.title("📦 תפריט")
+st.sidebar.title("תפריט")
 
-# כפתור רענון הזמנות (SQL)
-if st.sidebar.button("🔄 רענן נתוני הזמנות"):
-    load_orders_data.clear()
+if st.sidebar.button("🔄 רענן נתונים עכשיו"):
+    load_data_from_sql.clear()
     st.rerun()
 
 st.sidebar.divider()
 
-# ניהול מלאי (Session State)
+# כפתור מלאי חדש
 if "inventory_df" not in st.session_state:
     st.session_state["inventory_df"] = None
 
-st.sidebar.header("🏭 ניהול מלאי")
-if st.sidebar.button("📧 משוך מלאי עדכני מהמייל"):
+if st.sidebar.button("📧 משוך מלאי מהמייל"):
     inv_data = fetch_inventory_from_email()
     if inv_data is not None:
         st.session_state["inventory_df"] = inv_data
-        st.sidebar.success(f"עודכן: {len(inv_data)} מק\"טים")
-    else:
-        st.sidebar.error("נכשל במשיכת מלאי")
 
-# --- גוף הדשבורד ---
 st.title("📦 דשבורד ניהול הזמנות")
 
-# לשוניות ראשיות
-tab_main, tab_inventory = st.tabs(["📊 דשבורד הזמנות", "💀 מלאי מת / נמוך"])
+# --- לשוניות (Tabs) לשמירה על סדר ---
+tab_dashboard, tab_inventory = st.tabs(["📊 דשבורד והזמנות", "🏭 ניתוח מלאי"])
 
-# ==========================================
-# TAB 1: דשבורד הזמנות (הקוד המקורי המשופר)
-# ==========================================
-with tab_main:
-    # פילטרים
-    st.markdown("### 📅 סינון לפי תאריכים")
-    default_end = datetime.now().date()
-    default_start = default_end - timedelta(days=30)
-    
-    if not df_orders.empty:
-        d_min = df_orders['date_only'].min()
-        d_max = df_orders['date_only'].max()
-        if pd.notnull(d_min): default_start = d_min
-        if pd.notnull(d_max): default_end = d_max
+# ========================================================
+# TAB 1: דשבורד הזמנות (הקוד המקורי המלא שלך)
+# ========================================================
+with tab_dashboard:
+    df_filtered = df.copy()
 
-    c1, c2, _ = st.columns([1, 1, 2])
-    start_date = c1.date_input("מ:", value=default_start, format="DD/MM/YYYY")
-    end_date = c2.date_input("עד:", value=default_end, format="DD/MM/YYYY")
-
-    # סינון ה-DF
-    df_filtered = df_orders.copy()
-    if start_date and end_date:
-        mask = (df_filtered['date_only'] >= start_date) & (df_filtered['date_only'] <= end_date)
-        df_filtered = df_filtered.loc[mask]
-
-    # חיפוש מתקדם
-    with st.expander("🔎 חיפוש הזמנה ספציפי"):
-        s_col1, s_col2 = st.columns([1, 3])
-        search_type = s_col1.selectbox("חפש לפי:", [COL_SKU, COL_ORDER_NUM, COL_CUSTOMER, COL_PHONE])
-        search_val = s_col2.text_input("ערך לחיפוש:")
+    with st.container():
+        st.markdown("### 📅 סינון לפי תאריכים")
         
-        if search_val:
-            if search_type == COL_SKU:
-                clean_val = clean_sku(search_val)
-                df_filtered = df_filtered[df_filtered[COL_SKU].str.contains(clean_val, na=False)]
-            elif search_type == COL_PHONE:
-                # מנקים את החיפוש ומחפשים בתוך הטקסט הקיים (שיש בו כבר 0 מוביל או לא)
-                clean_input = re.sub(r'\D', '', search_val) 
-                # הסרת 0 מוביל לצורך השוואה גמישה
-                if clean_input.startswith('0'): clean_input = clean_input[1:]
-                
-                # חיפוש "מכיל" את המספר (כך ש-050 ימצא את 050...)
-                df_filtered = df_filtered[df_filtered[COL_PHONE].str.replace(r'\D','', regex=True).str.contains(clean_input, na=False)]
+        default_end = datetime.now().date()
+        default_start = default_end - timedelta(days=30)
+        
+        if 'date_only' in df.columns and not df.empty:
+            data_min = df['date_only'].min()
+            data_max = df['date_only'].max()
+            if pd.notnull(data_min): default_start = data_min
+            if pd.notnull(data_max): default_end = data_max
+
+        col_filter1, col_filter2, col_spacer = st.columns([1, 1, 2])
+        
+        with col_filter1:
+            start_date = st.date_input("מתאריך:", value=default_start, format="DD/MM/YYYY")
+        with col_filter2:
+            end_date = st.date_input("עד תאריך:", value=default_end, format="DD/MM/YYYY")
+
+        if start_date and end_date:
+            if start_date <= end_date:
+                mask_date = (df['date_only'] >= start_date) & (df['date_only'] <= end_date)
+                df_filtered = df_filtered.loc[mask_date]
             else:
-                df_filtered = df_filtered[df_filtered[search_type].astype(str).str.contains(search_val, case=False, na=False)]
+                st.error("⚠️ תאריך התחלה מאוחר מתאריך סיום")
 
-    # KPI
-    total_pkgs = int(df_filtered[COL_QUANTITY].sum())
-    reg_pkgs = int(df_filtered[df_filtered[COL_SHIP_NUM].str.strip() != ""][COL_QUANTITY].sum())
-    install_pkgs = int(df_filtered[df_filtered[COL_SHIP_NUM].str.strip() == ""][COL_QUANTITY].sum())
+    df_date_range_only = df_filtered.copy()
+    total_packages_in_date_range = df_date_range_only[COL_QUANTITY].sum()
 
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("סה\"כ הזמנות", len(df_filtered))
-    k2.metric("📦 חבילות", f"{total_pkgs:,}")
-    k3.metric("🚛 משלוחים", f"{reg_pkgs:,}")
-    k4.metric("🛠️ התקנות", f"{install_pkgs:,}")
+    st.markdown("---")
 
-    st.divider()
-
-    # טבלה ראשית
-    st.subheader("📋 רשימת הזמנות")
+    # --- חיפוש מתקדם (בתוך הטאב או בסרגל הצד - שמרתי בסרגל הצד כפי שהיה במקור) ---
+    st.sidebar.header("🔎 חיפוש מתקדם")
+    st.sidebar.info("החיפוש מתבצע בתוך טווח התאריכים שנבחר")
     
-    # בחירת עמודות לתצוגה
-    disp_cols = [COL_DATE, COL_ORDER_NUM, COL_CUSTOMER, COL_PHONE, COL_CITY, COL_SKU, COL_QUANTITY, COL_SHIP_NUM]
-    final_disp = df_filtered[[c for c in disp_cols if c in df_filtered.columns]].copy()
+    search_options = {
+        "מק\"ט": COL_SKU,
+        "מספר הזמנה": COL_ORDER_NUM,
+        "שם לקוח": COL_CUSTOMER,
+        "טלפון": COL_PHONE
+    }
     
-    # עיצוב תאריך
-    if COL_DATE in final_disp.columns:
-        final_disp[COL_DATE] = final_disp[COL_DATE].dt.strftime('%d/%m/%Y')
+    search_type_label = st.sidebar.selectbox("חפש לפי:", list(search_options.keys()))
+    selected_col = search_options[search_type_label]
+    
+    search_term = st.sidebar.text_input("ערך לחיפוש:")
 
-    st.dataframe(final_disp, use_container_width=True, hide_index=True, height=400)
+    if search_term:
+        if selected_col == COL_SKU:
+            search_term_norm = clean_sku(search_term)
+            st.sidebar.caption(f"🔎 מחפש: {search_term_norm}")
+            mask = df_filtered[COL_SKU].str.contains(search_term_norm, na=False)
+            df_filtered = df_filtered[mask]
 
+        elif selected_col == COL_PHONE:
+            # מנרמל גם את הקלט וגם את החיפוש
+            clean_input = re.sub(r'\D', '', search_term)
+            if clean_input.startswith('0'): clean_input = clean_input[1:] # הסרה לצורך השוואה גמישה
+            
+            # חיפוש "מכיל" - מתעלם מ-0 מוביל
+            mask = df_filtered[COL_PHONE].astype(str).str.replace(r'\D','', regex=True).str.contains(clean_input, na=False)
+            df_filtered = df_filtered[mask]
 
-# ==========================================
-# TAB 2: ניתוח מלאי (החלק החדש והחכם)
-# ==========================================
+        elif selected_col in df_filtered.columns:
+            mask = df_filtered[selected_col].astype(str).str.contains(search_term, case=False, na=False)
+            df_filtered = df_filtered[mask]
+
+    # --- KPIs (המדדים שהיו חסרים) ---
+    total_rows = len(df_filtered)
+    total_packages = int(df_filtered[COL_QUANTITY].sum())
+    
+    # לוגיקה מקורית לזיהוי התקנות (ריק = התקנה)
+    regular_mask = df_filtered[COL_SHIP_NUM].str.strip() != ""
+    regular_packages = int(df_filtered.loc[regular_mask, COL_QUANTITY].sum())
+    
+    install_mask = df_filtered[COL_SHIP_NUM].str.strip() == ""
+    install_packages = int(df_filtered.loc[install_mask, COL_QUANTITY].sum())
+
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    kpi1.metric("📦 סה\"כ רשומות", total_rows)
+    kpi2.metric("🔢 סה\"כ חבילות", f"{total_packages:,}")
+    kpi3.metric("🚛 הזמנות רגילות", f"{regular_packages:,}")
+    kpi4.metric("🛠️ התקנות", f"{install_packages:,}")
+    
+    st.markdown("---")
+
+    # --- גרפים וסטטיסטיקות (Top 5) ---
+    if not df_filtered.empty and COL_SKU in df_filtered.columns and COL_QUANTITY in df_filtered.columns:
+        
+        sku_stats = df_filtered.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index()
+        total_q_current = df_filtered[COL_QUANTITY].sum()
+        
+        if not sku_stats.empty:
+            best_sku_row = sku_stats.loc[sku_stats[COL_QUANTITY].idxmax()]
+            best_seller = best_sku_row[COL_SKU]
+            count_best = int(best_sku_row[COL_QUANTITY])
+            
+            st.metric("🌟 המק\"ט הכי נמכר", f"{best_seller}", f"{count_best} חבילות")
+            
+            st.divider()
+            
+            col_top, col_bottom = st.columns(2)
+            
+            with col_top:
+                st.subheader("🏆 5 המוצרים המובילים")
+                top_5 = sku_stats.sort_values(by=COL_QUANTITY, ascending=False).head(5).copy()
+                if total_q_current > 0:
+                    top_5['נתח שוק (%)'] = (top_5[COL_QUANTITY] / total_q_current * 100).round(1).astype(str) + '%'
+                top_5 = top_5.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
+                st.dataframe(top_5, hide_index=True, use_container_width=True)
+
+            with col_bottom:
+                st.subheader("🐢 5 המוצרים החלשים")
+                bottom_5 = sku_stats.sort_values(by=COL_QUANTITY, ascending=True).head(5).copy()
+                if total_q_current > 0:
+                    bottom_5['נתח שוק (%)'] = (bottom_5[COL_QUANTITY] / total_q_current * 100).round(1).astype(str) + '%'
+                bottom_5 = bottom_5.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
+                st.dataframe(bottom_5, hide_index=True, use_container_width=True)
+
+    st.markdown("---")
+
+    # --- גרף פעילות יומית ---
+    st.subheader("📈 פעילות יומית")
+    if 'date_only' in df_filtered.columns and not df_filtered.empty:
+        daily_data = df_filtered.groupby('date_only').agg({
+            COL_QUANTITY: 'sum',  
+            COL_SKU: 'count'
+        }).rename(columns={COL_QUANTITY: 'חבילות', COL_SKU: 'מספר שורות'})
+        
+        tab_g1, tab_g2 = st.tabs(["📝 מספר הזמנות", "📊 כמות חבילות"])
+        
+        with tab_g1:
+            st.line_chart(daily_data['מספר שורות'], color="#E74C3C") 
+
+        with tab_g2:
+            st.bar_chart(daily_data['חבילות'], color="#2E86C1") 
+            
+    # --- טבלה מלאה ---
+    st.markdown("---")
+    st.subheader(f"רשימת הזמנות מלאה ({len(df_filtered)})")
+    
+    display_cols = [COL_DATE, COL_ORDER_NUM, COL_CUSTOMER, COL_PHONE, COL_CITY, COL_STREET, COL_HOUSE, COL_SKU, COL_QUANTITY, COL_SHIP_NUM]
+    final_cols = [c for c in display_cols if c in df_filtered.columns]
+    
+    display_df = df_filtered[final_cols].copy()
+    
+    if COL_DATE in display_df.columns:
+        display_df[COL_DATE] = display_df[COL_DATE].dt.strftime('%d/%m/%Y')
+
+    st.dataframe(display_df, use_container_width=True, hide_index=True, height=500)
+
+# ========================================================
+# TAB 2: ניתוח מלאי (החלק החדש)
+# ========================================================
 with tab_inventory:
     if st.session_state["inventory_df"] is None:
-        st.info("💡 כדי לראות נתוני מלאי מת, לחץ על הכפתור '📧 משוך מלאי מהמייל' בסרגל הצד.")
+        st.info("💡 כדי לראות נתוני מלאי, לחץ על הכפתור '📧 משוך מלאי מהמייל' בסרגל הצד.")
     else:
         df_inv = st.session_state["inventory_df"].copy()
         
         st.subheader("🕵️ ניתוח מלאי חכם")
         st.caption("השוואה בין המלאי הנוכחי (מהמייל האחרון) לבין מכירות ב-90 הימים האחרונים")
         
-        # 1. חישוב מכירות ב-90 יום האחרונים
+        # 1. חישוב מכירות ב-90 יום האחרונים מתוך כלל ההזמנות (ללא פילטר תאריכים של הדשבורד)
         cutoff_date = datetime.now().date() - timedelta(days=90)
-        recent_sales = df_orders[df_orders['date_only'] >= cutoff_date]
+        recent_sales = df[df['date_only'] >= cutoff_date]
         
         # סיכום מכירות לפי מק"ט
         sales_summary = recent_sales.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index()
         sales_summary.columns = [COL_SKU, "נמכר_90_יום"]
         
         # 2. מיזוג (Merge) בין המלאי למכירות
-        # Left Join: רוצים את כל המלאי, ורק אם יש מכירות נצמיד אותן
         merged = pd.merge(df_inv, sales_summary, on=COL_SKU, how="left")
         merged["נמכר_90_יום"] = merged["נמכר_90_יום"].fillna(0).astype(int)
         
         # 3. לוגיקה
-        # מלאי מת: יש במלאי (>0) אבל נמכר 0
         dead_stock = merged[(merged["מלאי_נוכחי"] > 0) & (merged["נמכר_90_יום"] == 0)].sort_values("מלאי_נוכחי", ascending=False)
-        
-        # מלאי נמוך: יש במלאי פחות מ-10, אבל המלאי לא ריק
         low_stock = merged[(merged["מלאי_נוכחי"] > 0) & (merged["מלאי_נוכחי"] < 10)].sort_values("מלאי_נוכחי", ascending=True)
 
-        # 4. תצוגה
         col_dead, col_low = st.columns(2)
         
         with col_dead:
@@ -416,14 +481,12 @@ with tab_inventory:
                 dead_stock[[COL_SKU, "מלאי_נוכחי"]], 
                 use_container_width=True, 
                 hide_index=True,
-                column_config={
-                    "מלאי_נוכחי": st.column_config.NumberColumn("יחידות במלאי", format="%d")
-                }
+                column_config={"מלאי_נוכחי": st.column_config.NumberColumn("יחידות במלאי", format="%d")}
             )
             
         with col_low:
             st.warning(f"⚠️ מלאי נמוך ({len(low_stock)} מוצרים)")
-            st.caption("מוצרים עם פחות מ-10 יחידות (שווה להזמין סחורה)")
+            st.caption("מוצרים עם פחות מ-10 יחידות")
             st.dataframe(
                 low_stock[[COL_SKU, "מלאי_נוכחי", "נמכר_90_יום"]], 
                 use_container_width=True, 
