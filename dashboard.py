@@ -33,7 +33,7 @@ COL_STREET = 'רחוב'
 COL_HOUSE = 'מספר בית'
 
 # ==========================================
-# 🎨 CSS
+# 🎨 CSS (כולל הסתרת אינדקסים בטבלאות)
 # ==========================================
 st.markdown("""
 <style>
@@ -288,7 +288,7 @@ st.title("📦 דשבורד ניהול הזמנות")
 tab_dashboard, tab_inventory = st.tabs(["📊 דשבורד והזמנות", "🏭 ניתוח מלאי"])
 
 # ========================================================
-# TAB 1: דשבורד הזמנות (הקוד המקורי המלא שלך)
+# TAB 1: דשבורד הזמנות
 # ========================================================
 with tab_dashboard:
     df_filtered = df.copy()
@@ -324,7 +324,7 @@ with tab_dashboard:
 
     st.markdown("---")
 
-    # --- חיפוש מתקדם (בתוך הטאב או בסרגל הצד - שמרתי בסרגל הצד כפי שהיה במקור) ---
+    # --- חיפוש מתקדם ---
     st.sidebar.header("🔎 חיפוש מתקדם")
     st.sidebar.info("החיפוש מתבצע בתוך טווח התאריכים שנבחר")
     
@@ -360,11 +360,10 @@ with tab_dashboard:
             mask = df_filtered[selected_col].astype(str).str.contains(search_term, case=False, na=False)
             df_filtered = df_filtered[mask]
 
-    # --- KPIs (המדדים שהיו חסרים) ---
+    # --- KPIs ---
     total_rows = len(df_filtered)
     total_packages = int(df_filtered[COL_QUANTITY].sum())
     
-    # לוגיקה מקורית לזיהוי התקנות (ריק = התקנה)
     regular_mask = df_filtered[COL_SHIP_NUM].str.strip() != ""
     regular_packages = int(df_filtered.loc[regular_mask, COL_QUANTITY].sum())
     
@@ -379,7 +378,7 @@ with tab_dashboard:
     
     st.markdown("---")
 
-    # --- גרפים וסטטיסטיקות (Top 5) ---
+    # --- גרפים וסטטיסטיקות (Top / Bottom) ---
     if not df_filtered.empty and COL_SKU in df_filtered.columns and COL_QUANTITY in df_filtered.columns:
         
         sku_stats = df_filtered.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index()
@@ -405,12 +404,14 @@ with tab_dashboard:
                 st.dataframe(top_5, hide_index=True, use_container_width=True)
 
             with col_bottom:
-                st.subheader("🐢 5 המוצרים החלשים")
-                bottom_5 = sku_stats.sort_values(by=COL_QUANTITY, ascending=True).head(5).copy()
+                # --- תיקון: הצגת 50 מוצרים אחרונים במקום 5 ---
+                st.subheader("🐢 מוצרים חלשים (50 האחרונים)")
+                bottom_50 = sku_stats.sort_values(by=COL_QUANTITY, ascending=True).head(50).copy()
                 if total_q_current > 0:
-                    bottom_5['נתח שוק (%)'] = (bottom_5[COL_QUANTITY] / total_q_current * 100).round(1).astype(str) + '%'
-                bottom_5 = bottom_5.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
-                st.dataframe(bottom_5, hide_index=True, use_container_width=True)
+                    bottom_50['נתח שוק (%)'] = (bottom_50[COL_QUANTITY] / total_q_current * 100).round(1).astype(str) + '%'
+                bottom_50 = bottom_50.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
+                # תצוגה בגובה מוגבל עם גלילה
+                st.dataframe(bottom_50, hide_index=True, use_container_width=True, height=300)
 
     st.markdown("---")
 
@@ -445,7 +446,7 @@ with tab_dashboard:
     st.dataframe(display_df, use_container_width=True, hide_index=True, height=500)
 
 # ========================================================
-# TAB 2: ניתוח מלאי (החלק החדש)
+# TAB 2: ניתוח מלאי (מלאי מת / נמוך)
 # ========================================================
 with tab_inventory:
     if st.session_state["inventory_df"] is None:
