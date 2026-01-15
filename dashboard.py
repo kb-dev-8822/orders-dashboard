@@ -33,7 +33,7 @@ COL_STREET = 'רחוב'
 COL_HOUSE = 'מספר בית'
 
 # ==========================================
-# 🎨 CSS (כולל הסתרת אינדקסים בטבלאות)
+# 🎨 CSS
 # ==========================================
 st.markdown("""
 <style>
@@ -82,7 +82,7 @@ if not check_password():
     st.stop()
 
 # ==========================================
-# 🛠️ פונקציות עזר (כולל התיקון ל-0 מוביל)
+# 🛠️ פונקציות עזר
 # ==========================================
 
 def normalize_phone_str(phone_val):
@@ -348,11 +348,8 @@ with tab_dashboard:
             df_filtered = df_filtered[mask]
 
         elif selected_col == COL_PHONE:
-            # מנרמל גם את הקלט וגם את החיפוש
             clean_input = re.sub(r'\D', '', search_term)
-            if clean_input.startswith('0'): clean_input = clean_input[1:] # הסרה לצורך השוואה גמישה
-            
-            # חיפוש "מכיל" - מתעלם מ-0 מוביל
+            if clean_input.startswith('0'): clean_input = clean_input[1:] 
             mask = df_filtered[COL_PHONE].astype(str).str.replace(r'\D','', regex=True).str.contains(clean_input, na=False)
             df_filtered = df_filtered[mask]
 
@@ -378,7 +375,7 @@ with tab_dashboard:
     
     st.markdown("---")
 
-    # --- גרפים וסטטיסטיקות (Top / Bottom) ---
+    # --- גרפים וסטטיסטיקות (Top 10 / Slow Movers Slider) ---
     if not df_filtered.empty and COL_SKU in df_filtered.columns and COL_QUANTITY in df_filtered.columns:
         
         sku_stats = df_filtered.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index()
@@ -396,22 +393,30 @@ with tab_dashboard:
             col_top, col_bottom = st.columns(2)
             
             with col_top:
-                st.subheader("🏆 5 המוצרים המובילים")
-                top_5 = sku_stats.sort_values(by=COL_QUANTITY, ascending=False).head(5).copy()
+                # 🏆 10 המוצרים המובילים (במקום 5)
+                st.subheader("🏆 10 המוצרים המובילים")
+                top_10 = sku_stats.sort_values(by=COL_QUANTITY, ascending=False).head(10).copy()
                 if total_q_current > 0:
-                    top_5['נתח שוק (%)'] = (top_5[COL_QUANTITY] / total_q_current * 100).round(1).astype(str) + '%'
-                top_5 = top_5.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
-                st.dataframe(top_5, hide_index=True, use_container_width=True)
+                    top_10['נתח שוק (%)'] = (top_10[COL_QUANTITY] / total_q_current * 100).round(1).astype(str) + '%'
+                top_10 = top_10.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
+                st.dataframe(top_10, hide_index=True, use_container_width=True)
 
             with col_bottom:
-                # --- תיקון: הצגת 50 מוצרים אחרונים במקום 5 ---
-                st.subheader("🐢 מוצרים חלשים (50 האחרונים)")
-                bottom_50 = sku_stats.sort_values(by=COL_QUANTITY, ascending=True).head(50).copy()
+                st.subheader("🐢 מוצרים איטיים / חלשים")
+                
+                # סליידר חכם: המשתמש בוחר את הרף
+                threshold = st.slider("הצג מוצרים שנמכרו עד (כולל):", min_value=1, max_value=20, value=3)
+                
+                # סינון לפי הסף שנבחר בסליידר
+                slow_movers = sku_stats[sku_stats[COL_QUANTITY] <= threshold].sort_values(by=COL_QUANTITY, ascending=True).copy()
+                
                 if total_q_current > 0:
-                    bottom_50['נתח שוק (%)'] = (bottom_50[COL_QUANTITY] / total_q_current * 100).round(1).astype(str) + '%'
-                bottom_50 = bottom_50.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
-                # תצוגה בגובה מוגבל עם גלילה
-                st.dataframe(bottom_50, hide_index=True, use_container_width=True, height=300)
+                    slow_movers['נתח שוק (%)'] = (slow_movers[COL_QUANTITY] / total_q_current * 100).round(1).astype(str) + '%'
+                
+                slow_movers = slow_movers.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
+                
+                st.caption(f"נמצאו {len(slow_movers)} מוצרים שנמכרו {threshold} פעמים או פחות בטווח התאריכים הנבחר")
+                st.dataframe(slow_movers, hide_index=True, use_container_width=True, height=300)
 
     st.markdown("---")
 
