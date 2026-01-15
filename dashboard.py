@@ -110,7 +110,7 @@ def clean_sku(val):
 # 📥 טעינת נתונים (SQL + Email + Cache)
 # ==========================================
 
-@st.cache_data(ttl=600)
+@st.cache_data
 def load_data_from_sql():
     try:
         conn = psycopg2.connect(
