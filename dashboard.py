@@ -376,7 +376,7 @@ with tab_dashboard:
     
     st.markdown("---")
 
-    # --- גרפים וסטטיסטיקות (Top 10 / Slow Movers Input) ---
+# --- גרפים וסטטיסטיקות (Top 10 / Slow Movers Input) ---
     if not df_filtered.empty and COL_SKU in df_filtered.columns and COL_QUANTITY in df_filtered.columns:
         
         sku_stats = df_filtered.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index()
@@ -387,25 +387,32 @@ with tab_dashboard:
             best_seller = best_sku_row[COL_SKU]
             count_best = int(best_sku_row[COL_QUANTITY])
             
+            # מטריקה ראשית
             st.metric("🌟 המק\"ט הכי נמכר", f"{best_seller}", f"{count_best} חבילות")
             
             st.divider()
             
             col_top, col_bottom = st.columns(2)
             
+            # --- עמודה ימנית: 10 המוצרים המובילים ---
             with col_top:
-                # 🏆 10 המוצרים המובילים
                 st.subheader("🏆 10 המוצרים המובילים")
+                
+                # תיקון סימטריה: מוסיפים רווח ריק כדי לאזן עם שדה הקלט בצד השני
+                st.write("") 
+                st.write("") 
+                
                 top_10 = sku_stats.sort_values(by=COL_QUANTITY, ascending=False).head(10).copy()
                 if total_q_current > 0:
                     top_10['נתח שוק (%)'] = (top_10[COL_QUANTITY] / total_q_current * 100).round(1).astype(str) + '%'
                 top_10 = top_10.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
                 st.dataframe(top_10, hide_index=True, use_container_width=True)
 
+            # --- עמודה שמאלית: מוצרים איטיים ---
             with col_bottom:
                 st.subheader("🐢 מוצרים איטיים / חלשים")
                 
-                # --- השינוי: שדה מספרי (Number Input) במקום סליידר ---
+                # שדה הקלט שגרם לחוסר הסימטריה
                 threshold = st.number_input(
                     "הצג מוצרים שנמכרו עד (כולל):", 
                     min_value=1, 
@@ -413,7 +420,7 @@ with tab_dashboard:
                     step=1
                 )
                 
-                # סינון לפי הסף שנבחר
+                # סינון לפי הסף
                 slow_movers = sku_stats[sku_stats[COL_QUANTITY] <= threshold].sort_values(by=COL_QUANTITY, ascending=True).copy()
                 
                 if total_q_current > 0:
@@ -421,7 +428,7 @@ with tab_dashboard:
                 
                 slow_movers = slow_movers.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
                 
-                st.caption(f"נמצאו {len(slow_movers)} מוצרים שנמכרו {threshold} פעמים או פחות בטווח התאריכים הנבחר")
+                st.caption(f"נמצאו {len(slow_movers)} מוצרים שנמכרו {threshold} פעמים או פחות")
                 st.dataframe(slow_movers, hide_index=True, use_container_width=True, height=300)
 
     st.markdown("---")
