@@ -348,6 +348,7 @@ with tab_dashboard:
             df_filtered = df_filtered[mask]
 
         elif selected_col == COL_PHONE:
+            # מנרמל גם את הקלט וגם את החיפוש
             clean_input = re.sub(r'\D', '', search_term)
             if clean_input.startswith('0'): clean_input = clean_input[1:] 
             mask = df_filtered[COL_PHONE].astype(str).str.replace(r'\D','', regex=True).str.contains(clean_input, na=False)
@@ -375,7 +376,7 @@ with tab_dashboard:
     
     st.markdown("---")
 
-    # --- גרפים וסטטיסטיקות (Top 10 / Slow Movers Slider) ---
+    # --- גרפים וסטטיסטיקות (Top 10 / Slow Movers Input) ---
     if not df_filtered.empty and COL_SKU in df_filtered.columns and COL_QUANTITY in df_filtered.columns:
         
         sku_stats = df_filtered.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index()
@@ -393,7 +394,7 @@ with tab_dashboard:
             col_top, col_bottom = st.columns(2)
             
             with col_top:
-                # 🏆 10 המוצרים המובילים (במקום 5)
+                # 🏆 10 המוצרים המובילים
                 st.subheader("🏆 10 המוצרים המובילים")
                 top_10 = sku_stats.sort_values(by=COL_QUANTITY, ascending=False).head(10).copy()
                 if total_q_current > 0:
@@ -404,10 +405,15 @@ with tab_dashboard:
             with col_bottom:
                 st.subheader("🐢 מוצרים איטיים / חלשים")
                 
-                # סליידר חכם: המשתמש בוחר את הרף
-                threshold = st.slider("הצג מוצרים שנמכרו עד (כולל):", min_value=1, max_value=20, value=3)
+                # --- השינוי: שדה מספרי (Number Input) במקום סליידר ---
+                threshold = st.number_input(
+                    "הצג מוצרים שנמכרו עד (כולל):", 
+                    min_value=1, 
+                    value=3, 
+                    step=1
+                )
                 
-                # סינון לפי הסף שנבחר בסליידר
+                # סינון לפי הסף שנבחר
                 slow_movers = sku_stats[sku_stats[COL_QUANTITY] <= threshold].sort_values(by=COL_QUANTITY, ascending=True).copy()
                 
                 if total_q_current > 0:
