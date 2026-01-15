@@ -292,7 +292,7 @@ if st.sidebar.button("📧 משוך מלאי מהמייל"):
         st.session_state["inventory_df"] = inv_data
         st.sidebar.success("המלאי עודכן ונשמר!")
 
-st.title("📦 דשבורד ניהול הזמנות")
+st.title("📦 דשבורד ניהול מלאי")
 
 # --- לשוניות (Tabs) לשמירה על סדר ---
 tab_dashboard, tab_inventory = st.tabs(["📊 דשבורד והזמנות", "🏭 ניתוח מלאי"])
