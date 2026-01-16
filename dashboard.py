@@ -414,10 +414,10 @@ with tab_dashboard:
 
             # --- עמודה שמאלית: מוצרים איטיים (ב-3 חודשים) ---
             with col_bottom:
-                st.subheader("🐢 מוצרים איטיים / חלשים")
+                st.subheader("🐢 מוצרים איטיים / חלשים (3 חודשים)")
                 
                 threshold = st.number_input(
-                    "הצג מוצרים עם כמות חבילות עד (כולל):", 
+                    "הצג מוצרים שנמכרו בכמות חבילות עד (כולל):", 
                     min_value=1, 
                     value=3, 
                     step=1
