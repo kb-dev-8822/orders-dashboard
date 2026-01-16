@@ -184,7 +184,7 @@ def fetch_inventory_from_email():
     FILE_TO_FIND = "stock122.xlsx"
 
     status_container = st.empty()
-    status_container.info("🔄 מתחבר ל-Gmail ומושך קובץ מלאי...")
+    status_container.info("🔄 מושך מלאי...")
 
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
@@ -286,7 +286,7 @@ if "inventory_df" not in st.session_state:
         st.session_state["inventory_df"] = None
 
 # כפתור משיכה יזומה
-if st.sidebar.button("📧 משוך מלאי"):
+if st.sidebar.button("📧 משיכת מלאי עדכני"):
     inv_data = fetch_inventory_from_email()
     if inv_data is not None:
         st.session_state["inventory_df"] = inv_data
