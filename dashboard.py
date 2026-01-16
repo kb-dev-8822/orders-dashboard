@@ -475,7 +475,7 @@ with tab_inventory:
         df_inv = st.session_state["inventory_df"].copy()
         
         st.subheader("ניתוח מלאי")
-        st.caption("השוואה בין המלאי הנוכחי (מהמייל האחרון) לבין מכירות ב-90 הימים האחרונים")
+        st.caption("השוואה בין המלאי הנוכחי לבין מכירות ב-90 הימים האחרונים")
         
         # 1. חישוב מכירות ב-90 יום האחרונים מתוך כלל ההזמנות (ללא קשר לפילטר בדשבורד)
         cutoff_date = datetime.now().date() - timedelta(days=90)
