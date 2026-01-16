@@ -220,7 +220,7 @@ def fetch_inventory_from_email():
                                 
                                 if FILE_TO_FIND in filename:
                                     file_data = part.get_payload(decode=True)
-                                    status_container.success(f"✅ נמצא קובץ: {filename} בתאריך {msg['Date']}")
+                                    status_container.success(f"✅ מלאי עודכן בהצלחה")
                                     mail.close()
                                     mail.logout()
                                     
@@ -286,7 +286,7 @@ if "inventory_df" not in st.session_state:
         st.session_state["inventory_df"] = None
 
 # כפתור משיכה יזומה
-if st.sidebar.button("📧 משוך מלאי מהמייל"):
+if st.sidebar.button("📧 משוך מלאי"):
     inv_data = fetch_inventory_from_email()
     if inv_data is not None:
         st.session_state["inventory_df"] = inv_data
