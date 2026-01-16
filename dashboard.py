@@ -397,10 +397,10 @@ with tab_dashboard:
             
             # --- עמודה ימנית: המוצרים המובילים (ב-3 חודשים) ---
             with col_top:
-                st.subheader("🏆 המוצרים המובילים (3 חודשים)")
+                st.subheader("🏆 10 המוצרים המובילים (3 חודשים)")
                 
                 top_n = st.number_input(
-                    "כמות להצגה (ברירת מחדל 10):", 
+                    "כמות להצגה:", 
                     min_value=1, 
                     value=10, 
                     step=1
