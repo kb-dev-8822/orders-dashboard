@@ -470,7 +470,7 @@ with tab_dashboard:
 # ========================================================
 with tab_inventory:
     if st.session_state["inventory_df"] is None:
-        st.info("💡 כדי לראות נתוני מלאי, לחץ על הכפתור '📧 משוך מלאי מהמייל' בסרגל הצד.")
+        st.info("💡 כדי לראות נתוני מלאי, לחץ על הכפתור '📧 משוך מלאי עדכני' בסרגל הצד.")
     else:
         df_inv = st.session_state["inventory_df"].copy()
         
