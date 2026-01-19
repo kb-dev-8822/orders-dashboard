@@ -486,7 +486,18 @@ with tab_inventory:
 
         merged["סטטוס"] = merged.apply(get_status, axis=1)
         
-        final_view = merged[[
+        # --- סינון לפי סטטוס (התוספת החדשה!) ---
+        all_statuses = ["💀 מת", "🚨 קריטי", "⚠️ נמוך", "✅ תקין"]
+        selected_statuses = st.multiselect(
+            "סינון לפי סטטוס מלאי:",
+            options=all_statuses,
+            default=all_statuses
+        )
+        
+        # פילטור הטבלה
+        final_view = merged[merged["סטטוס"].isin(selected_statuses)].copy()
+        
+        final_view = final_view[[
             COL_SKU, 
             "סטטוס", 
             "מלאי_נוכחי", 
@@ -511,6 +522,7 @@ with tab_inventory:
                 "נמכר (90 יום)": st.column_config.NumberColumn("קצב מכירות", format="%d"),
             }
         )
+        st.caption(f"מציג {len(final_view)} מוצרים (מתוך {len(merged)})")
         
         st.divider()
         
