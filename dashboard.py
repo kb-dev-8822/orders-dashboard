@@ -7,6 +7,7 @@ import email
 from email.header import decode_header
 import io
 import os
+import numpy as np
 from datetime import datetime, timedelta
 
 # ==========================================
@@ -45,11 +46,13 @@ st.markdown("""
     [data-testid="stMetricValue"] { direction: ltr; text-align: right; }
     [data-testid="stMetricLabel"] { text-align: right; }
     .stButton button { width: 100%; }
+    
+    /* הסתרת כפתורי סגירה של סרגל הצד */
     [data-testid="stSidebarCollapsedControl"] { display: none !important; }
     section[data-testid="stSidebar"] > div > div:first-child button { display: none !important; }
     section[data-testid="stSidebar"] { direction: rtl; }
     
-    /* עיצוב טבלאות - הסתרת אינדקס */
+    /* הסתרת אינדקס בטבלאות */
     thead tr th:first-child {display:none}
     tbody th {display:none}
 </style>
@@ -110,7 +113,7 @@ def clean_sku(val):
 # 📥 טעינת נתונים (SQL + Email + Cache)
 # ==========================================
 
-@st.cache_data
+@st.cache_data(ttl=600)
 def load_data_from_sql():
     try:
         conn = psycopg2.connect(
@@ -121,13 +124,24 @@ def load_data_from_sql():
             password=st.secrets["supabase"]["DB_PASS"],
             sslmode='require'
         )
-        query = """
+        
+        # 1. שליפת הזמנות רגילות (שסופקו/יצאו)
+        query_orders = """
             SELECT order_num, customer_name, phone, city, street, house_num, sku, quantity, shipping_num, order_date 
             FROM orders
         """
-        df = pd.read_sql(query, conn)
+        df = pd.read_sql(query_orders, conn)
+        
+        # 2. שליפת הזמנות עתידיות (Pre-Orders) לצורך חישובים בלבד (לא לתצוגה הראשית)
+        query_pre = "SELECT sku, quantity FROM pre_orders"
+        try:
+            df_pre = pd.read_sql(query_pre, conn)
+        except Exception:
+            df_pre = pd.DataFrame(columns=['sku', 'quantity'])
+            
         conn.close()
 
+        # עיבוד הזמנות רגילות
         df = df.rename(columns={
             'order_num': COL_ORDER_NUM, 'customer_name': COL_CUSTOMER, 'phone': COL_PHONE,
             'city': COL_CITY, 'street': COL_STREET, 'house_num': COL_HOUSE,
@@ -151,19 +165,25 @@ def load_data_from_sql():
 
         if COL_SKU in df.columns:
             df[COL_SKU] = df[COL_SKU].apply(clean_sku)
+            
+        # עיבוד pre-orders (רק נרמול וסכימה)
+        if not df_pre.empty:
+            df_pre['sku'] = df_pre['sku'].apply(clean_sku)
+            df_pre['quantity'] = pd.to_numeric(df_pre['quantity'], errors='coerce').fillna(0)
+            df_pre_grouped = df_pre.groupby('sku')['quantity'].sum().reset_index().rename(columns={'quantity': 'backlog_qty'})
+        else:
+            df_pre_grouped = pd.DataFrame(columns=['sku', 'backlog_qty'])
 
-        return df
+        return df, df_pre_grouped
 
     except Exception as e:
         st.error(f"שגיאה בחיבור למסד הנתונים: {e}")
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
 
 def load_inventory_cache():
-    """טעינת מלאי מקובץ מקומי אם קיים"""
     if os.path.exists(INVENTORY_CACHE_FILE):
         try:
             df_inv = pd.read_csv(INVENTORY_CACHE_FILE)
-            # וידוא נרמול בטעינה מהקובץ
             if COL_SKU in df_inv.columns:
                 df_inv[COL_SKU] = df_inv[COL_SKU].apply(clean_sku)
             return df_inv
@@ -172,7 +192,6 @@ def load_inventory_cache():
     return None
 
 def fetch_inventory_from_email():
-    """משיכת קובץ המלאי האחרון מהמייל ושמירה למטמון"""
     if "email" not in st.secrets:
         st.error("חסרים פרטי אימייל ב-secrets.toml")
         return None
@@ -184,7 +203,7 @@ def fetch_inventory_from_email():
     FILE_TO_FIND = "stock122.xlsx"
 
     status_container = st.empty()
-    status_container.info("🔄 מושך מלאי...")
+    status_container.info("🔄 מתחבר ל-Gmail ומושך קובץ מלאי...")
 
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
@@ -220,7 +239,7 @@ def fetch_inventory_from_email():
                                 
                                 if FILE_TO_FIND in filename:
                                     file_data = part.get_payload(decode=True)
-                                    status_container.success(f"✅ מלאי עודכן בהצלחה")
+                                    status_container.success(f"✅ נמצא קובץ: {filename} בתאריך {msg['Date']}")
                                     mail.close()
                                     mail.logout()
                                     
@@ -243,9 +262,7 @@ def fetch_inventory_from_email():
                                         pivot_inv.columns = [COL_SKU, "מלאי_נוכחי"]
                                         pivot_inv[COL_SKU] = pivot_inv[COL_SKU].apply(clean_sku)
                                         
-                                        # שמירה למטמון
                                         pivot_inv.to_csv(INVENTORY_CACHE_FILE, index=False)
-                                        
                                         return pivot_inv
                                         
                                     except Exception as e:
@@ -265,8 +282,8 @@ def fetch_inventory_from_email():
 # 🖥️ ממשק ראשי
 # ==========================================
 
-# טעינת נתונים ראשונית
-df = load_data_from_sql()
+# טעינת נתונים (רגילים + pre_orders)
+df, df_pre_orders = load_data_from_sql()
 
 # --- סרגל צד ---
 st.sidebar.title("תפריט")
@@ -277,7 +294,6 @@ if st.sidebar.button("🔄 רענן נתונים עכשיו"):
 
 st.sidebar.divider()
 
-# ניהול מלאי - טעינה ראשונית מהמטמון אם קיים
 if "inventory_df" not in st.session_state:
     cached_inv = load_inventory_cache()
     if cached_inv is not None:
@@ -285,17 +301,15 @@ if "inventory_df" not in st.session_state:
     else:
         st.session_state["inventory_df"] = None
 
-# כפתור משיכה יזומה
-if st.sidebar.button("📧 משיכת מלאי עדכני"):
+if st.sidebar.button("📧 משוך מלאי מהמייל"):
     inv_data = fetch_inventory_from_email()
     if inv_data is not None:
         st.session_state["inventory_df"] = inv_data
         st.sidebar.success("המלאי עודכן ונשמר!")
 
-st.title("📦 דשבורד ניהול מלאי")
+st.title("📦 דשבורד ניהול הזמנות")
 
-# --- לשוניות (Tabs) לשמירה על סדר ---
-tab_dashboard, tab_inventory = st.tabs(["📊 דשבורד והזמנות", "🏭 ניתוח מלאי"])
+tab_dashboard, tab_inventory = st.tabs(["📊 דשבורד והזמנות", "🏭 ניתוח מלאי חכם"])
 
 # ========================================================
 # TAB 1: דשבורד הזמנות
@@ -306,7 +320,6 @@ with tab_dashboard:
     with st.container():
         st.markdown("### 📅 סינון לפי תאריכים")
         
-        # --- תיקון: ברירת מחדל מה-1 לחודש הנוכחי עד היום ---
         today = datetime.now().date()
         first_of_month = today.replace(day=1)
         
@@ -324,7 +337,6 @@ with tab_dashboard:
             else:
                 st.error("⚠️ תאריך התחלה מאוחר מתאריך סיום")
 
-    # --- חיפוש מתקדם (על הטווח המסונן) ---
     st.sidebar.header("🔎 חיפוש מתקדם")
     st.sidebar.info("החיפוש מתבצע בתוך טווח התאריכים שנבחר")
     
@@ -357,7 +369,7 @@ with tab_dashboard:
             mask = df_filtered[selected_col].astype(str).str.contains(search_term, case=False, na=False)
             df_filtered = df_filtered[mask]
 
-    # --- KPIs (מבוסס על הטווח המסונן) ---
+    # --- KPIs ---
     total_rows = len(df_filtered)
     total_packages = int(df_filtered[COL_QUANTITY].sum())
     
@@ -375,11 +387,7 @@ with tab_dashboard:
     
     st.markdown("---")
 
-    # =======================================================
-    # גרפים וסטטיסטיקות (לוגיקה נפרדת: 3 חודשים אחרונים)
-    # =======================================================
-    
-    # חישוב Dataset נפרד ל-3 חודשים אחרונים (ללא קשר לפילטר למעלה)
+    # --- סטטיסטיקות 3 חודשים (קבוע) ---
     cutoff_stats = datetime.now().date() - timedelta(days=90)
     df_stats_3m = df[df['date_only'] >= cutoff_stats].copy()
     
@@ -389,131 +397,123 @@ with tab_dashboard:
         total_q_stats = df_stats_3m[COL_QUANTITY].sum()
         
         if not sku_stats.empty:
-            # הסרתי את המטריקה של "המק"ט הכי נמכר"
-            
-            st.info("📊 הנתונים בטבלאות למטה מתייחסים ל-3 החודשים האחרונים (ללא קשר לטווח התאריכים שנבחר למעלה)")
+            st.info("📊 הנתונים בטבלאות למטה מתייחסים ל-3 החודשים האחרונים (ללא קשר לטווח התאריכים שנבחר)")
             
             col_top, col_bottom = st.columns(2)
             
-            # --- עמודה ימנית: המוצרים המובילים (ב-3 חודשים) ---
             with col_top:
-                st.subheader("🏆 10 המוצרים המובילים (3 חודשים)")
-                
-                top_n = st.number_input(
-                    "כמות להצגה:", 
-                    min_value=1, 
-                    value=10, 
-                    step=1
-                )
-                
+                st.subheader("🏆 המוצרים המובילים (3 חודשים)")
+                top_n = st.number_input("כמות להצגה (ברירת מחדל 10):", min_value=1, value=10, step=1)
                 top_df = sku_stats.sort_values(by=COL_QUANTITY, ascending=False).head(top_n).copy()
                 if total_q_stats > 0:
                     top_df['נתח שוק (%)'] = (top_df[COL_QUANTITY] / total_q_stats * 100).round(1).astype(str) + '%'
                 top_df = top_df.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
                 st.dataframe(top_df, hide_index=True, use_container_width=True)
 
-            # --- עמודה שמאלית: מוצרים איטיים (ב-3 חודשים) ---
             with col_bottom:
-                st.subheader("🐢 מוצרים איטיים / חלשים (3 חודשים)")
-                
-                threshold = st.number_input(
-                    "הצג מוצרים שנמכרו בכמות חבילות עד (כולל):", 
-                    min_value=1, 
-                    value=5, 
-                    step=1
-                )
-                
+                st.subheader("🐢 מוצרים איטיים / חלשים")
+                threshold = st.number_input("הצג מוצרים עם כמות חבילות עד (כולל):", min_value=1, value=3, step=1)
                 slow_movers = sku_stats[sku_stats[COL_QUANTITY] <= threshold].sort_values(by=COL_QUANTITY, ascending=True).copy()
-                
                 if total_q_stats > 0:
                     slow_movers['נתח שוק (%)'] = (slow_movers[COL_QUANTITY] / total_q_stats * 100).round(1).astype(str) + '%'
-                
                 slow_movers = slow_movers.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
-                
                 st.dataframe(slow_movers, hide_index=True, use_container_width=True, height=300)
                 st.caption(f"נמצאו {len(slow_movers)} מוצרים")
 
     st.markdown("---")
 
-    # --- גרף פעילות יומית (חוזרים לטווח המסונן של המשתמש) ---
     st.subheader("📈 פעילות יומית (בטווח הנבחר)")
     if 'date_only' in df_filtered.columns and not df_filtered.empty:
-        daily_data = df_filtered.groupby('date_only').agg({
-            COL_QUANTITY: 'sum',  
-            COL_SKU: 'count'
-        }).rename(columns={COL_QUANTITY: 'חבילות', COL_SKU: 'מספר שורות'})
-        
+        daily_data = df_filtered.groupby('date_only').agg({COL_QUANTITY: 'sum', COL_SKU: 'count'}).rename(columns={COL_QUANTITY: 'חבילות', COL_SKU: 'מספר שורות'})
         tab_g1, tab_g2 = st.tabs(["📝 מספר הזמנות", "📊 כמות חבילות"])
-        
-        with tab_g1:
-            st.line_chart(daily_data['מספר שורות'], color="#E74C3C") 
-
-        with tab_g2:
-            st.bar_chart(daily_data['חבילות'], color="#2E86C1") 
+        with tab_g1: st.line_chart(daily_data['מספר שורות'], color="#E74C3C") 
+        with tab_g2: st.bar_chart(daily_data['חבילות'], color="#2E86C1") 
             
-    # --- טבלה מלאה ---
     st.markdown("---")
     st.subheader(f"רשימת הזמנות מלאה ({len(df_filtered)})")
     
     display_cols = [COL_DATE, COL_ORDER_NUM, COL_CUSTOMER, COL_PHONE, COL_CITY, COL_STREET, COL_HOUSE, COL_SKU, COL_QUANTITY, COL_SHIP_NUM]
     final_cols = [c for c in display_cols if c in df_filtered.columns]
-    
     display_df = df_filtered[final_cols].copy()
-    
-    if COL_DATE in display_df.columns:
-        display_df[COL_DATE] = display_df[COL_DATE].dt.strftime('%d/%m/%Y')
+    if COL_DATE in display_df.columns: display_df[COL_DATE] = display_df[COL_DATE].dt.strftime('%d/%m/%Y')
 
     st.dataframe(display_df, use_container_width=True, hide_index=True, height=500)
 
 # ========================================================
-# TAB 2: ניתוח מלאי (מלאי מת / נמוך)
+# TAB 2: ניתוח מלאי חכם (ימי מלאי + הזמנות עתידיות)
 # ========================================================
 with tab_inventory:
     if st.session_state["inventory_df"] is None:
-        st.info("💡 כדי לראות נתוני מלאי, לחץ על הכפתור '📧 משוך מלאי עדכני' בסרגל הצד.")
+        st.info("💡 אין נתוני מלאי שמורים. לחץ על '📧 משוך מלאי מהמייל' בסרגל הצד.")
     else:
         df_inv = st.session_state["inventory_df"].copy()
         
-        st.subheader("ניתוח מלאי")
-        st.caption("השוואה בין המלאי הנוכחי לבין מכירות ב-90 הימים האחרונים")
-        
-        # 1. חישוב מכירות ב-90 יום האחרונים מתוך כלל ההזמנות (ללא קשר לפילטר בדשבורד)
+        st.subheader("🏭 דוח תחזית מלאי וימי אספקה")
+        st.caption("הנתונים משקללים מכירות 90 יום, מלאי נוכחי, והזמנות לקוחות עתידיות (Pre-Order)")
+
+        # 1. חישוב קצב מכירות (Velocity)
         cutoff_date = datetime.now().date() - timedelta(days=90)
         recent_sales = df[df['date_only'] >= cutoff_date]
-        
-        # סיכום מכירות לפי מק"ט
         sales_summary = recent_sales.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index()
-        sales_summary.columns = [COL_SKU, "נמכר_90_יום"]
+        sales_summary.columns = [COL_SKU, "sales_90"]
         
-        # 2. מיזוג (Merge) בין המלאי למכירות
+        # 2. מיזוג כל הנתונים: מלאי + מכירות + הזמנות עתידיות
         merged = pd.merge(df_inv, sales_summary, on=COL_SKU, how="left")
-        merged["נמכר_90_יום"] = merged["נמכר_90_יום"].fillna(0).astype(int)
+        merged = pd.merge(merged, df_pre_orders, left_on=COL_SKU, right_on='sku', how="left")
         
-        # 3. לוגיקה
-        dead_stock = merged[(merged["מלאי_נוכחי"] > 0) & (merged["נמכר_90_יום"] == 0)].sort_values("מלאי_נוכחי", ascending=False)
-        low_stock = merged[(merged["מלאי_נוכחי"] > 0) & (merged["מלאי_נוכחי"] < 10)].sort_values("מלאי_נוכחי", ascending=True)
+        # ניקוי NaN
+        merged["sales_90"] = merged["sales_90"].fillna(0)
+        merged["backlog_qty"] = merged["backlog_qty"].fillna(0) # הזמנות עתידיות
+        
+        # 3. חישובים לוגיים
+        merged["velocity_daily"] = merged["sales_90"] / 90
+        
+        # חישוב ימי מלאי (טיפול בחלוקה באפס)
+        merged["days_of_inventory"] = merged.apply(
+            lambda x: x["מלאי_נוכחי"] / x["velocity_daily"] if x["velocity_daily"] > 0 else 9999, 
+            axis=1
+        )
+        
+        # קביעת סטטוס
+        def get_status(row):
+            if row["sales_90"] == 0:
+                return "💀 מת"
+            if row["days_of_inventory"] < 14:
+                return "🚨 קריטי"
+            if row["days_of_inventory"] < 45:
+                return "⚠️ נמוך"
+            return "✅ תקין"
 
-        col_dead, col_low = st.columns(2)
+        merged["סטטוס"] = merged.apply(get_status, axis=1)
         
-        with col_dead:
-            st.error(f"💀 מלאי מת ({len(dead_stock)} מוצרים)")
-            st.caption("מוצרים שקיימים במלאי אך לא נמכרו כלל ב-3 החודשים האחרונים")
-            st.dataframe(
-                dead_stock[[COL_SKU, "מלאי_נוכחי"]], 
-                use_container_width=True, 
-                hide_index=True,
-                column_config={"מלאי_נוכחי": st.column_config.NumberColumn("יחידות במלאי", format="%d")}
-            )
-            
-        with col_low:
-            st.warning(f"⚠️ מלאי נמוך ({len(low_stock)} מוצרים)")
-            st.caption("מוצרים עם פחות מ-10 יחידות")
-            st.dataframe(
-                low_stock[[COL_SKU, "מלאי_נוכחי", "נמכר_90_יום"]], 
-                use_container_width=True, 
-                hide_index=True,
-                column_config={
-                    "מלאי_נוכחי": st.column_config.NumberColumn("במלאי", format="%d"),
-                    "נמכר_90_יום": st.column_config.NumberColumn("מכירות (3 חודשים)", format="%d")
-                }
-            )
+        # סידור הטבלה לתצוגה
+        final_view = merged[[
+            COL_SKU, 
+            "סטטוס", 
+            "מלאי_נוכחי", 
+            "backlog_qty", # עמודה חדשה!
+            "sales_90", 
+            "days_of_inventory"
+        ]].sort_values("days_of_inventory", ascending=True)
+
+        final_view = final_view.rename(columns={
+            "backlog_qty": "הוזמן מראש (ממתין)",
+            "sales_90": "נמכר (90 יום)",
+            "days_of_inventory": "ימי מלאי (צפי)"
+        })
+
+        # שינוי 9999 לסימן אינסוף בתצוגה
+        final_view["ימי מלאי (צפי)"] = final_view["ימי מלאי (צפי)"].apply(lambda x: "∞" if x == 9999 else f"{int(x)}")
+
+        # עיצוב מותנה (Highlight)
+        st.dataframe(
+            final_view,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "סטטוס": st.column_config.TextColumn("מצב מלאי"),
+                "מלאי_נוכחי": st.column_config.NumberColumn("במלאי פיזי", format="%d"),
+                "הוזמן מראש (ממתין)": st.column_config.NumberColumn("הוזמן מראש ⏳", format="%d", help="הזמנות לקוחות שעדיין לא סופקו"),
+                "נמכר (90 יום)": st.column_config.NumberColumn("קצב מכירות", format="%d"),
+            }
+        )
