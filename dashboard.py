@@ -310,13 +310,16 @@ st.title("📦 דשבורד ניהול הזמנות")
 
 # --- חישוב תחזית מכירות חודשית (KPIs עליונים) ---
 now = datetime.now()
-current_month_start = now.replace(day=1)
+current_month_start = now.replace(day=1).date() # תאריך ללא שעה
+today_date = now.date() # תאריך ללא שעה
+
 days_in_current_month = calendar.monthrange(now.year, now.month)[1]
 current_day_num = now.day
 
+# סינון לפי תאריך (date_only) כדי למנוע חיתוך לפי שעות
 df_curr_month = df[
-    (df[COL_DATE] >= pd.Timestamp(current_month_start)) & 
-    (df[COL_DATE] <= pd.Timestamp(now))
+    (df['date_only'] >= current_month_start) & 
+    (df['date_only'] <= today_date)
 ]
 total_packages_mtd = df_curr_month[COL_QUANTITY].sum()
 
