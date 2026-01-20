@@ -112,7 +112,7 @@ def clean_sku(val):
 # 📥 טעינת נתונים (SQL + Email + Cache)
 # ==========================================
 
-@st.cache_data(ttl=600)
+@st.cache_data
 def load_data_from_sql():
     try:
         conn = psycopg2.connect(
@@ -202,7 +202,7 @@ def fetch_inventory_from_email():
     FILE_TO_FIND = "stock122.xlsx"
 
     status_container = st.empty()
-    status_container.info("🔄 מתחבר ל-Gmail ומושך קובץ מלאי...")
+    status_container.info("🔄 מושך מלאי...")
 
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
@@ -300,7 +300,7 @@ if "inventory_df" not in st.session_state:
     else:
         st.session_state["inventory_df"] = None
 
-if st.sidebar.button("📧 משוך מלאי מהמייל"):
+if st.sidebar.button("📧 משוך מלאי"):
     inv_data = fetch_inventory_from_email()
     if inv_data is not None:
         st.session_state["inventory_df"] = inv_data
@@ -445,9 +445,9 @@ with tab_dashboard:
                 top_df = sku_stats.sort_values(by='sales_90', ascending=False).head(top_n).copy()
                 
                 # --- ביקוש חודשי ו-30 יום ---
-                top_df['ביקוש (חודשי)'] = (top_df['sales_90'] / 3).astype(int)
+                top_df['ביקוש (3 חודשים)'] = (top_df['sales_90'] / 3).astype(int)
                 
-                top_df = top_df.rename(columns={COL_SKU: 'מק"ט', 'sales_90': 'חבילות (90 יום)', 'sales_30': 'חבילות (30 יום)'})
+                top_df = top_df.rename(columns={COL_SKU: 'מק"ט', 'sales_90': 'חבילות (90 יום)', 'sales_30': 'ביקוש (30 יום)'})
                 st.dataframe(top_df, hide_index=True, use_container_width=True)
 
             with col_bottom:
@@ -456,9 +456,9 @@ with tab_dashboard:
                 slow_movers = sku_stats[sku_stats['sales_90'] <= threshold].sort_values(by='sales_90', ascending=True).copy()
                 
                 # --- ביקוש חודשי ו-30 יום ---
-                slow_movers['ביקוש (חודשי)'] = (slow_movers['sales_90'] / 3).astype(int)
+                slow_movers['ביקוש (3 חודשים)'] = (slow_movers['sales_90'] / 3).astype(int)
                 
-                slow_movers = slow_movers.rename(columns={COL_SKU: 'מק"ט', 'sales_90': 'חבילות (90 יום)', 'sales_30': 'חבילות (30 יום)'})
+                slow_movers = slow_movers.rename(columns={COL_SKU: 'מק"ט', 'sales_90': 'חבילות (90 יום)', 'sales_30': 'ביקוש (30 יום)'})
                 st.dataframe(slow_movers, hide_index=True, use_container_width=True, height=300)
                 st.caption(f"נמצאו {len(slow_movers)} מוצרים")
 
@@ -486,7 +486,7 @@ with tab_dashboard:
 # ========================================================
 with tab_inventory:
     if st.session_state["inventory_df"] is None:
-        st.info("💡 אין נתוני מלאי שמורים. לחץ על '📧 משוך מלאי מהמייל' בסרגל הצד.")
+        st.info("💡 אין נתוני מלאי שמורים. לחץ על '📧 משוך מלאי' בסרגל הצד.")
     else:
         df_inv = st.session_state["inventory_df"].copy()
         
@@ -537,8 +537,8 @@ with tab_inventory:
                 hide_index=True,
                 column_config={
                     "מלאי_נוכחי": st.column_config.NumberColumn("יחידות במלאי", format="%d"),
-                    "avg_monthly_sales": st.column_config.NumberColumn("ביקוש (חודשי)", format="%d"),
-                    "sales_30": st.column_config.NumberColumn("נמכר (30 יום)", format="%d")
+                    "avg_monthly_sales": st.column_config.NumberColumn("ביקוש (3 חודשים)", format="%d"),
+                    "sales_30": st.column_config.NumberColumn("ביקוש (30 יום)", format="%d")
                 }
             )
             st.caption(f"נמצאו {len(df_last_units)} מוצרים")
@@ -563,8 +563,8 @@ with tab_inventory:
                 hide_index=True,
                 column_config={
                     "מלאי_נוכחי": st.column_config.NumberColumn("במלאי", format="%d"),
-                    "avg_monthly_sales": st.column_config.NumberColumn("ביקוש (חודשי)", format="%d"),
-                    "sales_30": st.column_config.NumberColumn("נמכר (30 יום)", format="%d"),
+                    "avg_monthly_sales": st.column_config.NumberColumn("ביקוש (3 חודשים)", format="%d"),
+                    "sales_30": st.column_config.NumberColumn("ביקוש (30 יום)", format="%d"),
                     "days_of_inventory": st.column_config.NumberColumn("ימים לסיום המלאי", format="%d")
                 }
             )
