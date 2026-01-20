@@ -203,7 +203,7 @@ def fetch_inventory_from_email():
     FILE_TO_FIND = "stock122.xlsx"
 
     status_container = st.empty()
-    status_container.info("🔄 מתחבר ל-Gmail ומושך קובץ מלאי...")
+    status_container.info("🔄 מושך מלאי...")
 
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
@@ -301,7 +301,7 @@ if "inventory_df" not in st.session_state:
     else:
         st.session_state["inventory_df"] = None
 
-# --- הכפתור עם הטקסט שלך ---
+# הכפתור עם הטקסט המעודכן שלך
 if st.sidebar.button("📧 משוך מלאי"):
     inv_data = fetch_inventory_from_email()
     if inv_data is not None:
@@ -311,19 +311,17 @@ if st.sidebar.button("📧 משוך מלאי"):
 st.title("📦 דשבורד ניהול הזמנות")
 
 # --- חישוב תחזית מכירות חודשית (KPIs עליונים) ---
-# שימוש בשעון ישראל
 try:
     now = datetime.now(ZoneInfo("Asia/Jerusalem"))
 except Exception:
     now = datetime.now()
 
-current_month_start = now.replace(day=1).date() # תאריך ללא שעה
-today_date = now.date() # תאריך ללא שעה
+current_month_start = now.replace(day=1).date()
+today_date = now.date()
 
 days_in_current_month = calendar.monthrange(now.year, now.month)[1]
 current_day_num = now.day
 
-# סינון לפי תאריך (date_only) כדי למנוע חיתוך לפי שעות
 df_curr_month = df[
     (df['date_only'] >= current_month_start) & 
     (df['date_only'] <= today_date)
@@ -358,7 +356,8 @@ with tab_dashboard:
     with st.container():
         st.markdown("### 📅 סינון לפי תאריכים")
         
-        today_default = datetime.now().date()
+        # --- תיקון: שימוש בשעון ישראל כדי שהיום יהיה 21 ולא 20 ---
+        today_default = datetime.now(ZoneInfo("Asia/Jerusalem")).date()
         first_of_month = today_default.replace(day=1)
         
         col_filter1, col_filter2, col_spacer = st.columns([1, 1, 2])
@@ -451,12 +450,12 @@ with tab_dashboard:
                 top_n = st.number_input("כמות להצגה (ברירת מחדל 10):", min_value=1, value=10, step=1)
                 top_df = sku_stats.sort_values(by='sales_90', ascending=False).head(top_n).copy()
                 
-                # --- חישוב ממוצע ביקוש חודשי ---
+                # חישוב ממוצע ביקוש
                 top_df['avg_monthly_sales'] = (top_df['sales_90'] / 3).astype(int)
                 
+                # --- שינוי כותרות העמודות לפי הבקשה שלך ---
                 top_df = top_df.rename(columns={COL_SKU: 'מק"ט', 'sales_90': 'חבילות (90 יום)', 'sales_30': 'ביקוש (30 יום)'})
                 
-                # תצוגה עם כותרת חדשה
                 st.dataframe(
                     top_df, 
                     hide_index=True, 
@@ -471,9 +470,9 @@ with tab_dashboard:
                 threshold = st.number_input("הצג מוצרים עם כמות חבילות עד (כולל):", min_value=1, value=3, step=1)
                 slow_movers = sku_stats[sku_stats['sales_90'] <= threshold].sort_values(by='sales_90', ascending=True).copy()
                 
-                # --- חישוב ממוצע ביקוש חודשי ---
                 slow_movers['avg_monthly_sales'] = (slow_movers['sales_90'] / 3).astype(int)
                 
+                # --- שינוי כותרות ---
                 slow_movers = slow_movers.rename(columns={COL_SKU: 'מק"ט', 'sales_90': 'חבילות (90 יום)', 'sales_30': 'ביקוש (30 יום)'})
                 
                 st.dataframe(
@@ -531,10 +530,7 @@ with tab_inventory:
         merged["מלאי_נוכחי"] = merged["מלאי_נוכחי"].fillna(0).astype(int)
         
         # חישובים לוגיים
-        # ימי מלאי על בסיס 30 יום
         merged["velocity_daily"] = merged["sales_30"] / 30
-        
-        # ממוצע ביקוש חודשי (על בסיס 3 חודשים)
         merged["avg_monthly_sales"] = (merged["sales_90"] / 3).astype(int)
         
         merged["days_of_inventory"] = merged.apply(
