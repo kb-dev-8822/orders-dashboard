@@ -404,8 +404,8 @@ with tab_dashboard:
                 top_n = st.number_input("כמות להצגה (ברירת מחדל 10):", min_value=1, value=10, step=1)
                 top_df = sku_stats.sort_values(by=COL_QUANTITY, ascending=False).head(top_n).copy()
                 
-                # --- שינוי כאן: הוספת ביקוש חודשי במקום נתח שוק ---
-                top_df['ביקוש (חודשי)'] = (top_df[COL_QUANTITY] / 3).round(1)
+                # --- ביקוש חודשי שלם ---
+                top_df['ביקוש (חודשי)'] = (top_df[COL_QUANTITY] / 3).astype(int)
                 
                 top_df = top_df.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
                 st.dataframe(top_df, hide_index=True, use_container_width=True)
@@ -415,8 +415,8 @@ with tab_dashboard:
                 threshold = st.number_input("הצג מוצרים עם כמות חבילות עד (כולל):", min_value=1, value=3, step=1)
                 slow_movers = sku_stats[sku_stats[COL_QUANTITY] <= threshold].sort_values(by=COL_QUANTITY, ascending=True).copy()
                 
-                # --- שינוי כאן: הוספת ביקוש חודשי במקום נתח שוק ---
-                slow_movers['ביקוש (חודשי)'] = (slow_movers[COL_QUANTITY] / 3).round(1)
+                # --- ביקוש חודשי שלם ---
+                slow_movers['ביקוש (חודשי)'] = (slow_movers[COL_QUANTITY] / 3).astype(int)
                 
                 slow_movers = slow_movers.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
                 st.dataframe(slow_movers, hide_index=True, use_container_width=True, height=300)
@@ -464,7 +464,10 @@ with tab_inventory:
         
         # 3. חישובים לוגיים
         merged["velocity_daily"] = merged["sales_90"] / 90
-        merged["avg_monthly_sales"] = (merged["sales_90"] / 3).round(1)
+        
+        # --- ביקוש חודשי שלם ---
+        merged["avg_monthly_sales"] = (merged["sales_90"] / 3).astype(int)
+        
         merged["days_of_inventory"] = merged.apply(
             lambda x: x["מלאי_נוכחי"] / x["velocity_daily"] if x["velocity_daily"] > 0 else 9999, 
             axis=1
@@ -489,7 +492,7 @@ with tab_inventory:
                 hide_index=True,
                 column_config={
                     "מלאי_נוכחי": st.column_config.NumberColumn("יחידות במלאי", format="%d"),
-                    "avg_monthly_sales": st.column_config.NumberColumn("ביקוש (חודשי)", format="%.1f")
+                    "avg_monthly_sales": st.column_config.NumberColumn("ביקוש (חודשי)", format="%d")
                 }
             )
             st.caption(f"נמצאו {len(df_last_units)} מוצרים")
@@ -514,7 +517,7 @@ with tab_inventory:
                 hide_index=True,
                 column_config={
                     "מלאי_נוכחי": st.column_config.NumberColumn("במלאי", format="%d"),
-                    "avg_monthly_sales": st.column_config.NumberColumn("ביקוש (חודשי)", format="%.1f"),
+                    "avg_monthly_sales": st.column_config.NumberColumn("ביקוש (חודשי)", format="%d"),
                     "days_of_inventory": st.column_config.NumberColumn("ימים לסיום המלאי", format="%d")
                 }
             )
