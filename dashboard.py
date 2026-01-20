@@ -42,7 +42,7 @@ INVENTORY_CACHE_FILE = "inventory_cache.csv"
 st.markdown("""
 <style>
     .stApp { direction: rtl; text-align: right; }
-    h1, h2, h3, p, div, .stMarkdown, .stRadio, .stSelectbox, .stTextInput, .stAlert { text-align: right; }
+    h1, h2, h3, p, div, .stMarkdown, .stRadio, .stSelectbox, .stTextInput, .stAlert, .stNumberInput { text-align: right; }
     [data-testid="stMetricValue"] { direction: ltr; text-align: right; }
     [data-testid="stMetricLabel"] { text-align: right; }
     .stButton button { width: 100%; }
@@ -158,7 +158,6 @@ def load_data_from_sql():
         if COL_PHONE in df.columns:
             df[COL_PHONE] = df[COL_PHONE].apply(normalize_phone_str)
 
-        # המרה ל-INTEGER
         if COL_QUANTITY in df.columns:
             df[COL_QUANTITY] = pd.to_numeric(df[COL_QUANTITY], errors='coerce').fillna(0).astype(int)
 
@@ -169,7 +168,6 @@ def load_data_from_sql():
         if not df_pre.empty:
             df_pre['sku'] = df_pre['sku'].apply(clean_sku)
             df_pre['quantity'] = pd.to_numeric(df_pre['quantity'], errors='coerce').fillna(0).astype(int)
-            # קיבוץ לפי מק"ט
             df_pre_grouped = df_pre.groupby('sku')['quantity'].sum().reset_index().rename(columns={'quantity': 'backlog_qty'})
         else:
             df_pre_grouped = pd.DataFrame(columns=['sku', 'backlog_qty'])
@@ -448,103 +446,125 @@ with tab_inventory:
     else:
         df_inv = st.session_state["inventory_df"].copy()
         
-        # --- חלק עליון: ניתוח מלאי פיזי ---
-        st.subheader("🏭 ניתוח מלאי פיזי")
-        st.caption("משווה את המלאי הפיזי (מהמייל) לקצב המכירות ב-90 יום האחרונים.")
-
-        # 1. חישוב קצב מכירות
+        # --- הכנת הנתונים ---
+        # 1. חישוב מכירות ב-90 יום
         cutoff_date = datetime.now().date() - timedelta(days=90)
         recent_sales = df[df['date_only'] >= cutoff_date]
         sales_summary = recent_sales.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index()
         sales_summary.columns = [COL_SKU, "sales_90"]
         
-        # 2. מיזוג מלאי פיזי + מכירות (בלי Pre-Orders)
+        # 2. מיזוג
         merged = pd.merge(df_inv, sales_summary, on=COL_SKU, how="left")
-        
-        # ניקוי NaN והמרה לאינטג'ר
         merged["sales_90"] = merged["sales_90"].fillna(0).astype(int)
         merged["מלאי_נוכחי"] = merged["מלאי_נוכחי"].fillna(0).astype(int)
         
         # 3. חישובים לוגיים
         merged["velocity_daily"] = merged["sales_90"] / 90
-        
-        # חישוב ימי מלאי
+        merged["avg_monthly_sales"] = (merged["sales_90"] / 3).round(1)
         merged["days_of_inventory"] = merged.apply(
             lambda x: x["מלאי_נוכחי"] / x["velocity_daily"] if x["velocity_daily"] > 0 else 9999, 
             axis=1
         )
-        
-        # קביעת סטטוס
-        def get_status(row):
-            if row["sales_90"] == 0:
-                return "💀 מת"
-            if row["days_of_inventory"] < 14:
-                return "🚨 קריטי"
-            if row["days_of_inventory"] < 45:
-                return "⚠️ נמוך"
-            return "✅ תקין"
 
-        merged["סטטוס"] = merged.apply(get_status, axis=1)
+        st.subheader("🏭 ניתוח מלאי מפוצל")
         
-        # --- השינוי ל-SELECTBOX (רשימה נפתחת נקייה) ---
-        all_statuses = ["הצג הכל", "💀 מת", "🚨 קריטי", "⚠️ נמוך", "✅ תקין"]
-        selected_status = st.selectbox(
-            "סינון לפי סטטוס מלאי:",
-            options=all_statuses,
-        )
+        # --- שורה עליונה: יחידות אחרונות + ימי מלאי נמוכים ---
+        row1_col1, row1_col2 = st.columns(2)
         
-        # פילטור הטבלה
-        if selected_status == "הצג הכל":
-            final_view = merged.copy()
-        else:
-            final_view = merged[merged["סטטוס"] == selected_status].copy()
-        
-        final_view = final_view[[
-            COL_SKU, 
-            "סטטוס", 
-            "מלאי_נוכחי", 
-            "sales_90", 
-            "days_of_inventory"
-        ]].sort_values("days_of_inventory", ascending=True)
-
-        final_view = final_view.rename(columns={
-            "sales_90": "נמכר (90 יום)",
-            "days_of_inventory": "ימי מלאי (צפי)"
-        })
-
-        final_view["ימי מלאי (צפי)"] = final_view["ימי מלאי (צפי)"].apply(lambda x: "∞" if x == 9999 else f"{int(x)}")
-
-        st.dataframe(
-            final_view,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "סטטוס": st.column_config.TextColumn("מצב מלאי"),
-                "מלאי_נוכחי": st.column_config.NumberColumn("במלאי פיזי", format="%d"),
-                "נמכר (90 יום)": st.column_config.NumberColumn("קצב מכירות", format="%d"),
-            }
-        )
-        st.caption(f"מציג {len(final_view)} מוצרים")
-        
-        st.divider()
-        
-        # --- חלק תחתון: טבלה נפרדת לזמן אספקה ארוך ---
-        st.subheader("🚢 מעקב הזמנות זמן אספקה ארוך (Pre-Sale)")
-        st.caption("כמות יחידות שנמכרו ללקוחות (מתוך קובץ 'זמן אספקה ארוך'). השתמש בזה כדי לוודא שלא מכרת יותר ממה שהזמנת מהספק.")
-        
-        if not df_pre_orders.empty:
-            pre_view = df_pre_orders.rename(columns={
-                'sku': 'מק"ט',
-                'backlog_qty': 'כמות שנמכרה (ממתינה)'
-            }).sort_values('כמות שנמכרה (ממתינה)', ascending=False)
+        # טבלה 1: יחידות אחרונות
+        with row1_col1:
+            st.markdown("#### 📦 יחידות אחרונות")
+            threshold_units = st.number_input("הצג מוצרים עם מלאי פיזי מתחת ל:", min_value=0, value=10, step=1, key="th_units")
+            
+            df_last_units = merged[merged["מלאי_נוכחי"] < threshold_units].sort_values("מלאי_נוכחי", ascending=True)
             
             st.dataframe(
-                pre_view,
+                df_last_units[[COL_SKU, "מלאי_נוכחי"]],
                 use_container_width=True,
                 hide_index=True,
                 column_config={
-                    "כמות שנמכרה (ממתינה)": st.column_config.NumberColumn("סה\"כ נמכר ללקוחות", format="%d"),
+                    "מלאי_נוכחי": st.column_config.NumberColumn("יחידות במלאי", format="%d")
                 }
             )
-        else:
-            st.info("אין כרגע הזמנות זמן אספקה ארוך במערכת.")
+            st.caption(f"נמצאו {len(df_last_units)} מוצרים")
+
+        # טבלה 2: ימי מלאי נמוכים
+        with row1_col2:
+            st.markdown("#### ⏳ ימי מלאי נמוכים")
+            threshold_days = st.number_input("הצג מוצרים עם ימי מלאי מתחת ל:", min_value=0, value=31, step=1, key="th_days")
+            
+            # מסננים: רק מה שיש לו מלאי (לא 0) אבל נגמר מהר, וגם לא "אינסוף" ימים
+            df_low_days = merged[
+                (merged["days_of_inventory"] < threshold_days) & 
+                (merged["מלאי_נוכחי"] > 0)
+            ].sort_values("days_of_inventory", ascending=True)
+            
+            # המרה לתצוגה יפה
+            display_low_days = df_low_days.copy()
+            display_low_days["days_of_inventory"] = display_low_days["days_of_inventory"].astype(int)
+            
+            st.dataframe(
+                display_low_days[[COL_SKU, "מלאי_נוכחי", "days_of_inventory"]],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "מלאי_נוכחי": st.column_config.NumberColumn("במלאי", format="%d"),
+                    "days_of_inventory": st.column_config.NumberColumn("ימים לסיום המלאי", format="%d")
+                }
+            )
+            st.caption(f"נמצאו {len(df_low_days)} מוצרים")
+
+        st.divider()
+
+        # --- שורה תחתונה: מלאי מת + זמן אספקה ארוך ---
+        row2_col1, row2_col2 = st.columns(2)
+        
+        # טבלה 3: מלאי מת
+        with row2_col1:
+            st.markdown("#### 💀 מלאי מת / איטי")
+            # לוגיקה: נמכר X פעמים או פחות ב-90 יום (דיפולט 0)
+            threshold_dead = st.number_input("הצג מוצרים שנמכרו (ב-90 יום) עד:", min_value=0, value=0, step=1, key="th_dead")
+            
+            # מסננים: יש מלאי, אבל המכירות נמוכות/אפסיות
+            df_dead = merged[
+                (merged["sales_90"] <= threshold_dead) & 
+                (merged["מלאי_נוכחי"] > 0)
+            ].sort_values("מלאי_נוכחי", ascending=False)
+            
+            st.dataframe(
+                df_dead[[COL_SKU, "מלאי_נוכחי", "sales_90"]],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "מלאי_נוכחי": st.column_config.NumberColumn("תקוע במלאי", format="%d"),
+                    "sales_90": st.column_config.NumberColumn("סך מכירות (90 יום)", format="%d")
+                }
+            )
+            st.caption(f"נמצאו {len(df_dead)} מוצרים")
+
+        # טבלה 4: זמן אספקה ארוך (Pre-Orders)
+        with row2_col2:
+            st.markdown("#### 🚢 זמן אספקה ארוך (Pre-Order)")
+            # כדי לשמור על איזון (Balanced UI), הוספתי פילטר גם כאן
+            threshold_pre = st.number_input("הצג מוצרים עם כמות מוזמנת מעל:", min_value=0, value=0, step=1, key="th_pre")
+            
+            if not df_pre_orders.empty:
+                # סינון לפי הכמות המינימלית שנבחרה
+                df_pre_filtered = df_pre_orders[df_pre_orders['backlog_qty'] > threshold_pre].copy()
+                
+                pre_view = df_pre_filtered.rename(columns={
+                    'sku': 'מק"ט',
+                    'backlog_qty': 'כמות'
+                }).sort_values('כמות', ascending=False)
+                
+                st.dataframe(
+                    pre_view,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "כמות": st.column_config.NumberColumn("הוזמן ע\"י לקוחות", format="%d"),
+                    }
+                )
+                st.caption(f"נמצאו {len(pre_view)} מוצרים")
+            else:
+                st.info("אין נתונים להצגה")
