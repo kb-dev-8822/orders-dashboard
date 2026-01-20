@@ -302,7 +302,7 @@ if "inventory_df" not in st.session_state:
         st.session_state["inventory_df"] = None
 
 # הכפתור עם הטקסט המעודכן שלך
-if st.sidebar.button("📧 משוך מלאי"):
+if st.sidebar.button("📧 משוך מלאי עדכני"):
     inv_data = fetch_inventory_from_email()
     if inv_data is not None:
         st.session_state["inventory_df"] = inv_data
