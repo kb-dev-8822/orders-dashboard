@@ -5,6 +5,7 @@ import re
 import imaplib
 import email
 from email.header import decode_header
+from email.utils import parsedate_to_datetime # <--- הוספתי לטיפול בתאריך מהמייל
 import io
 import os
 import numpy as np
@@ -37,6 +38,7 @@ COL_STREET = 'רחוב'
 COL_HOUSE = 'מספר בית'
 
 INVENTORY_CACHE_FILE = "inventory_cache.csv"
+INVENTORY_DATE_FILE = "inventory_date.txt" # <--- קובץ לשמירת תאריך המלאי
 
 # ==========================================
 # 🎨 CSS
@@ -181,20 +183,31 @@ def load_data_from_sql():
         return pd.DataFrame(), pd.DataFrame()
 
 def load_inventory_cache():
+    # טעינת הטבלה
+    df_inv = None
     if os.path.exists(INVENTORY_CACHE_FILE):
         try:
             df_inv = pd.read_csv(INVENTORY_CACHE_FILE)
             if COL_SKU in df_inv.columns:
                 df_inv[COL_SKU] = df_inv[COL_SKU].apply(clean_sku)
-            return df_inv
         except Exception:
-            return None
-    return None
+            df_inv = None
+            
+    # טעינת התאריך
+    inv_date = None
+    if os.path.exists(INVENTORY_DATE_FILE):
+        try:
+            with open(INVENTORY_DATE_FILE, "r") as f:
+                inv_date = f.read().strip()
+        except:
+            inv_date = None
+            
+    return df_inv, inv_date
 
 def fetch_inventory_from_email():
     if "email" not in st.secrets:
         st.error("חסרים פרטי אימייל ב-secrets.toml")
-        return None
+        return None, None
 
     EMAIL_USER = st.secrets["email"]["user"]
     EMAIL_PASS = st.secrets["email"]["password"]
@@ -213,7 +226,7 @@ def fetch_inventory_from_email():
         status, messages = mail.search(None, f'FROM "{TARGET_SENDER}"')
         if not messages[0]:
             status_container.warning(f"לא נמצאו מיילים מ-{TARGET_SENDER}")
-            return None
+            return None, None
 
         email_ids = messages[0].split()
         
@@ -239,7 +252,18 @@ def fetch_inventory_from_email():
                                 
                                 if FILE_TO_FIND in filename:
                                     file_data = part.get_payload(decode=True)
-                                    status_container.success(f"✅ נמצא קובץ: {filename} בתאריך {msg['Date']}")
+                                    
+                                    # --- חילוץ ועיבוד תאריך ---
+                                    email_date_str = msg["Date"]
+                                    try:
+                                        dt_obj = parsedate_to_datetime(email_date_str)
+                                        # המרה לפורמט יפה: DD/MM/YY
+                                        formatted_date = dt_obj.strftime("%d/%m/%y")
+                                    except:
+                                        formatted_date = datetime.now().strftime("%d/%m/%y")
+                                        
+                                    status_container.success(f"✅ מלאי עודכן בהצלחה (תאריך: {formatted_date})")
+                                    
                                     mail.close()
                                     mail.logout()
                                     
@@ -252,7 +276,7 @@ def fetch_inventory_from_email():
                                                 header_row = i
                                                 break
                                         
-                                        if header_row == -1: return None
+                                        if header_row == -1: return None, None
                                         
                                         excel_file.seek(0)
                                         df_inv = pd.read_excel(excel_file, header=header_row)
@@ -262,21 +286,27 @@ def fetch_inventory_from_email():
                                         pivot_inv.columns = [COL_SKU, "מלאי_נוכחי"]
                                         pivot_inv[COL_SKU] = pivot_inv[COL_SKU].apply(clean_sku)
                                         
+                                        # שמירת הקובץ
                                         pivot_inv.to_csv(INVENTORY_CACHE_FILE, index=False)
-                                        return pivot_inv
+                                        
+                                        # שמירת התאריך בקובץ נפרד
+                                        with open(INVENTORY_DATE_FILE, "w") as f:
+                                            f.write(formatted_date)
+                                            
+                                        return pivot_inv, formatted_date
                                         
                                     except Exception as e:
                                         st.error(f"שגיאה בעיבוד אקסל: {e}")
-                                        return None
+                                        return None, None
         
         status_container.warning("לא נמצא קובץ אקסל מתאים במיילים האחרונים.")
         mail.close()
         mail.logout()
-        return None
+        return None, None
 
     except Exception as e:
         st.error(f"שגיאה בהתחברות למייל: {e}")
-        return None
+        return None, None
 
 # ==========================================
 # 🖥️ ממשק ראשי
@@ -294,19 +324,23 @@ if st.sidebar.button("🔄 רענן נתונים עכשיו"):
 
 st.sidebar.divider()
 
+# טעינה ראשונית של המלאי והתאריך
 if "inventory_df" not in st.session_state:
-    cached_inv = load_inventory_cache()
+    cached_inv, cached_date = load_inventory_cache()
     if cached_inv is not None:
         st.session_state["inventory_df"] = cached_inv
+        st.session_state["inventory_date"] = cached_date
     else:
         st.session_state["inventory_df"] = None
+        st.session_state["inventory_date"] = None
 
 # הכפתור עם הטקסט המעודכן שלך
 if st.sidebar.button("📧 משוך מלאי עדכני"):
-    inv_data = fetch_inventory_from_email()
+    inv_data, inv_date_str = fetch_inventory_from_email()
     if inv_data is not None:
         st.session_state["inventory_df"] = inv_data
-        st.sidebar.success("המלאי עודכן ונשמר!")
+        st.session_state["inventory_date"] = inv_date_str
+        # ההודעה עצמה מוצגת כבר בתוך הפונקציה
 
 st.title("📦 דשבורד ניהול הזמנות")
 
@@ -356,7 +390,6 @@ with tab_dashboard:
     with st.container():
         st.markdown("### 📅 סינון לפי תאריכים")
         
-        # --- תיקון: שימוש בשעון ישראל כדי שהיום יהיה 21 ולא 20 ---
         today_default = datetime.now(ZoneInfo("Asia/Jerusalem")).date()
         first_of_month = today_default.replace(day=1)
         
@@ -453,7 +486,6 @@ with tab_dashboard:
                 # חישוב ממוצע ביקוש
                 top_df['avg_monthly_sales'] = (top_df['sales_90'] / 3).astype(int)
                 
-                # --- שינוי כותרות העמודות לפי הבקשה שלך ---
                 top_df = top_df.rename(columns={COL_SKU: 'מק"ט', 'sales_90': 'חבילות (90 יום)', 'sales_30': 'ביקוש (30 יום)'})
                 
                 st.dataframe(
@@ -510,9 +542,12 @@ with tab_dashboard:
 # ========================================================
 with tab_inventory:
     if st.session_state["inventory_df"] is None:
-        st.info("💡 אין נתוני מלאי שמורים. לחץ על '📧 משוך מלאי' בסרגל הצד.")
+        st.info("💡 אין נתוני מלאי שמורים. לחץ על '📧 משוך מלאי עדכני' בסרגל הצד.")
     else:
         df_inv = st.session_state["inventory_df"].copy()
+        
+        # שליפת תאריך המלאי מה-Session
+        inv_date_display = st.session_state.get("inventory_date", "לא ידוע")
         
         # --- הכנת הנתונים ---
         cutoff_90 = datetime.now().date() - timedelta(days=90)
@@ -538,7 +573,8 @@ with tab_inventory:
             axis=1
         )
 
-        st.subheader("🏭 ניתוח מלאי מפוצל")
+        # --- כותרת דינמית עם התאריך ---
+        st.subheader(f"🏭 ניתוח מלאי מפוצל (מציג מלאי מתאריך: {inv_date_display})")
         
         # --- שורה עליונה ---
         row1_col1, row1_col2 = st.columns(2)
