@@ -112,7 +112,7 @@ def clean_sku(val):
 # 📥 טעינת נתונים (SQL + Email + Cache)
 # ==========================================
 
-@st.cache_data
+@st.cache_data(ttl=600)
 def load_data_from_sql():
     try:
         conn = psycopg2.connect(
@@ -141,7 +141,6 @@ def load_data_from_sql():
         conn.close()
 
         # עיבוד הזמנות רגילות
-        # כאן אנחנו משנים את order_date ל-COL_DATE (תאריך)
         df = df.rename(columns={
             'order_num': COL_ORDER_NUM, 'customer_name': COL_CUSTOMER, 'phone': COL_PHONE,
             'city': COL_CITY, 'street': COL_STREET, 'house_num': COL_HOUSE,
@@ -315,7 +314,6 @@ current_month_start = now.replace(day=1)
 days_in_current_month = calendar.monthrange(now.year, now.month)[1]
 current_day_num = now.day
 
-# תיקון: שימוש ב-COL_DATE במקום 'order_date' כי העמודה שונתה
 df_curr_month = df[
     (df[COL_DATE] >= pd.Timestamp(current_month_start)) & 
     (df[COL_DATE] <= pd.Timestamp(now))
@@ -329,7 +327,7 @@ if current_day_num > 0:
     daily_avg = total_packages_mtd / current_day_num
     forecast_packages = daily_avg * days_in_current_month
     forecast_revenue = int(forecast_packages * 390)
-    forecast_revenue_net = int(forecast_revenue * 0.95) # בניכוי 5%
+    forecast_revenue_net = int(forecast_revenue * 0.95)
 
 # הצגת KPIs עליונים
 kpi_top1, kpi_top2, kpi_top3 = st.columns(3)
@@ -506,7 +504,8 @@ with tab_inventory:
         merged["מלאי_נוכחי"] = merged["מלאי_נוכחי"].fillna(0).astype(int)
         
         # 3. חישובים לוגיים
-        merged["velocity_daily"] = merged["sales_90"] / 90
+        # === התיקון: קצב יומי לפי 30 יום בלבד ===
+        merged["velocity_daily"] = merged["sales_30"] / 30
         
         # ביקוש חודשי (ממוצע 3 חודשים)
         merged["avg_monthly_sales"] = (merged["sales_90"] / 3).astype(int)
