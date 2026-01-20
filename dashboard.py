@@ -141,6 +141,7 @@ def load_data_from_sql():
         conn.close()
 
         # עיבוד הזמנות רגילות
+        # כאן אנחנו משנים את order_date ל-COL_DATE (תאריך)
         df = df.rename(columns={
             'order_num': COL_ORDER_NUM, 'customer_name': COL_CUSTOMER, 'phone': COL_PHONE,
             'city': COL_CITY, 'street': COL_STREET, 'house_num': COL_HOUSE,
@@ -309,17 +310,15 @@ if st.sidebar.button("📧 משוך מלאי מהמייל"):
 st.title("📦 דשבורד ניהול הזמנות")
 
 # --- חישוב תחזית מכירות חודשית (KPIs עליונים) ---
-# הערה: חישוב זה מתבצע על כלל הנתונים, ללא קשר לפילטרים של המשתמש
 now = datetime.now()
 current_month_start = now.replace(day=1)
-# מציאת היום האחרון בחודש הנוכחי
 days_in_current_month = calendar.monthrange(now.year, now.month)[1]
 current_day_num = now.day
 
-# סינון נתונים לחודש הנוכחי בלבד
+# תיקון: שימוש ב-COL_DATE במקום 'order_date' כי העמודה שונתה
 df_curr_month = df[
-    (df['order_date'] >= pd.Timestamp(current_month_start)) & 
-    (df['order_date'] <= pd.Timestamp(now))
+    (df[COL_DATE] >= pd.Timestamp(current_month_start)) & 
+    (df[COL_DATE] <= pd.Timestamp(now))
 ]
 total_packages_mtd = df_curr_month[COL_QUANTITY].sum()
 
@@ -329,14 +328,14 @@ forecast_revenue_net = 0
 if current_day_num > 0:
     daily_avg = total_packages_mtd / current_day_num
     forecast_packages = daily_avg * days_in_current_month
-    forecast_revenue = forecast_packages * 390
-    forecast_revenue_net = forecast_revenue * 0.95 # בניכוי 5%
+    forecast_revenue = int(forecast_packages * 390)
+    forecast_revenue_net = int(forecast_revenue * 0.95) # בניכוי 5%
 
 # הצגת KPIs עליונים
 kpi_top1, kpi_top2, kpi_top3 = st.columns(3)
 kpi_top1.metric("📅 יום בחודש", f"{current_day_num}/{days_in_current_month}")
-kpi_top2.metric("💰 צפי מכירות (ברוטו)", f"₪{int(forecast_revenue):,}")
-kpi_top3.metric("📉 צפי מכירות (נטו -5%)", f"₪{int(forecast_revenue_net):,}")
+kpi_top2.metric("💰 צפי מכירות (ברוטו)", f"₪{forecast_revenue:,}")
+kpi_top3.metric("📉 צפי מכירות (נטו -5%)", f"₪{forecast_revenue_net:,}")
 
 st.markdown("---")
 
