@@ -345,7 +345,7 @@ kpi_top3.metric("📉 צפי מכירות (נטו -5%)", f"₪{forecast_revenue_
 
 st.markdown("---")
 
-tab_dashboard, tab_inventory = st.tabs(["📊 דשבורד והזמנות", "🏭 ניתוח מלאי חכם"])
+tab_dashboard, tab_inventory = st.tabs(["📊 דשבורד והזמנות", "🏭 ניתוח מלאי"])
 
 # ========================================================
 # TAB 1: דשבורד הזמנות
