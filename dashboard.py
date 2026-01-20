@@ -403,8 +403,10 @@ with tab_dashboard:
                 st.subheader("🏆 המוצרים המובילים (3 חודשים)")
                 top_n = st.number_input("כמות להצגה (ברירת מחדל 10):", min_value=1, value=10, step=1)
                 top_df = sku_stats.sort_values(by=COL_QUANTITY, ascending=False).head(top_n).copy()
-                if total_q_stats > 0:
-                    top_df['נתח שוק (%)'] = (top_df[COL_QUANTITY] / total_q_stats * 100).round(1).astype(str) + '%'
+                
+                # --- שינוי כאן: הוספת ביקוש חודשי במקום נתח שוק ---
+                top_df['ביקוש (חודשי)'] = (top_df[COL_QUANTITY] / 3).round(1)
+                
                 top_df = top_df.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
                 st.dataframe(top_df, hide_index=True, use_container_width=True)
 
@@ -412,8 +414,10 @@ with tab_dashboard:
                 st.subheader("🐢 מוצרים איטיים / חלשים")
                 threshold = st.number_input("הצג מוצרים עם כמות חבילות עד (כולל):", min_value=1, value=3, step=1)
                 slow_movers = sku_stats[sku_stats[COL_QUANTITY] <= threshold].sort_values(by=COL_QUANTITY, ascending=True).copy()
-                if total_q_stats > 0:
-                    slow_movers['נתח שוק (%)'] = (slow_movers[COL_QUANTITY] / total_q_stats * 100).round(1).astype(str) + '%'
+                
+                # --- שינוי כאן: הוספת ביקוש חודשי במקום נתח שוק ---
+                slow_movers['ביקוש (חודשי)'] = (slow_movers[COL_QUANTITY] / 3).round(1)
+                
                 slow_movers = slow_movers.rename(columns={COL_SKU: 'מק"ט', COL_QUANTITY: 'חבילות'})
                 st.dataframe(slow_movers, hide_index=True, use_container_width=True, height=300)
                 st.caption(f"נמצאו {len(slow_movers)} מוצרים")
@@ -478,12 +482,14 @@ with tab_inventory:
             
             df_last_units = merged[merged["מלאי_נוכחי"] < threshold_units].sort_values("מלאי_נוכחי", ascending=True)
             
+            # --- הוספת עמודת ביקוש חודשי ---
             st.dataframe(
-                df_last_units[[COL_SKU, "מלאי_נוכחי"]],
+                df_last_units[[COL_SKU, "מלאי_נוכחי", "avg_monthly_sales"]],
                 use_container_width=True,
                 hide_index=True,
                 column_config={
-                    "מלאי_נוכחי": st.column_config.NumberColumn("יחידות במלאי", format="%d")
+                    "מלאי_נוכחי": st.column_config.NumberColumn("יחידות במלאי", format="%d"),
+                    "avg_monthly_sales": st.column_config.NumberColumn("ביקוש (חודשי)", format="%.1f")
                 }
             )
             st.caption(f"נמצאו {len(df_last_units)} מוצרים")
@@ -493,22 +499,22 @@ with tab_inventory:
             st.markdown("#### ⏳ ימי מלאי נמוכים")
             threshold_days = st.number_input("הצג מוצרים עם ימי מלאי מתחת ל:", min_value=0, value=31, step=1, key="th_days")
             
-            # מסננים: רק מה שיש לו מלאי (לא 0) אבל נגמר מהר, וגם לא "אינסוף" ימים
             df_low_days = merged[
                 (merged["days_of_inventory"] < threshold_days) & 
                 (merged["מלאי_נוכחי"] > 0)
             ].sort_values("days_of_inventory", ascending=True)
             
-            # המרה לתצוגה יפה
             display_low_days = df_low_days.copy()
             display_low_days["days_of_inventory"] = display_low_days["days_of_inventory"].astype(int)
             
+            # --- הוספת עמודת ביקוש חודשי ---
             st.dataframe(
-                display_low_days[[COL_SKU, "מלאי_נוכחי", "days_of_inventory"]],
+                display_low_days[[COL_SKU, "מלאי_נוכחי", "avg_monthly_sales", "days_of_inventory"]],
                 use_container_width=True,
                 hide_index=True,
                 column_config={
                     "מלאי_נוכחי": st.column_config.NumberColumn("במלאי", format="%d"),
+                    "avg_monthly_sales": st.column_config.NumberColumn("ביקוש (חודשי)", format="%.1f"),
                     "days_of_inventory": st.column_config.NumberColumn("ימים לסיום המלאי", format="%d")
                 }
             )
@@ -522,10 +528,8 @@ with tab_inventory:
         # טבלה 3: מלאי מת
         with row2_col1:
             st.markdown("#### 💀 מלאי מת / איטי")
-            # לוגיקה: נמכר X פעמים או פחות ב-90 יום (דיפולט 0)
             threshold_dead = st.number_input("הצג מוצרים שנמכרו (ב-90 יום) עד:", min_value=0, value=0, step=1, key="th_dead")
             
-            # מסננים: יש מלאי, אבל המכירות נמוכות/אפסיות
             df_dead = merged[
                 (merged["sales_90"] <= threshold_dead) & 
                 (merged["מלאי_נוכחי"] > 0)
@@ -545,11 +549,9 @@ with tab_inventory:
         # טבלה 4: זמן אספקה ארוך (Pre-Orders)
         with row2_col2:
             st.markdown("#### 🚢 זמן אספקה ארוך (Pre-Order)")
-            # כדי לשמור על איזון (Balanced UI), הוספתי פילטר גם כאן
             threshold_pre = st.number_input("הצג מוצרים עם כמות מוזמנת מעל:", min_value=0, value=0, step=1, key="th_pre")
             
             if not df_pre_orders.empty:
-                # סינון לפי הכמות המינימלית שנבחרה
                 df_pre_filtered = df_pre_orders[df_pre_orders['backlog_qty'] > threshold_pre].copy()
                 
                 pre_view = df_pre_filtered.rename(columns={
