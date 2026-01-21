@@ -601,7 +601,7 @@ with tab_inventory:
         # טבלה 2: ימי מלאי נמוכים
         with row1_col2:
             st.markdown("#### ⏳ ימי מלאי נמוכים")
-            threshold_days = st.number_input("הצג מוצרים עם ימי מלאי מתחת ל:", min_value=0, value=31, step=1, key="th_days")
+            threshold_days = st.number_input("הצג מוצרים עם ימי מלאי מתחת ל:", min_value=0, value=121, step=1, key="th_days")
             
             df_low_days = merged[
                 (merged["days_of_inventory"] < threshold_days) & 
