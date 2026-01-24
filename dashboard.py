@@ -163,14 +163,20 @@ def load_data_from_sql():
         if COL_SKU in df_all.columns:
             df_all[COL_SKU] = df_all[COL_SKU].apply(clean_sku)
 
-        # --- התיקון: פיצול חכם יותר (מכיל את המילה, לא חייב להיות זהה ב-100%) ---
+        # --- דיאגנוסטיקה: בדיקה מה קיים בעמודת סוג הזמנה ---
+        if COL_TYPE in df_all.columns:
+            unique_types = df_all[COL_TYPE].unique()
+            # נשמור ב-session state כדי להציג למשתמש
+            st.session_state["debug_types"] = unique_types
         
-        # 1. הזמנות רגילות (מכיל "Regular")
+        # --- סינון רחב יותר ---
+        
+        # 1. הזמנות רגילות: מכיל "Regular"
         mask_regular = df_all[COL_TYPE].astype(str).str.contains("Regular", case=False, na=False)
         df_regular = df_all[mask_regular].copy()
         
-        # 2. הזמנות מוקדמות (מכיל "Pre-Order")
-        mask_pre = df_all[COL_TYPE].astype(str).str.contains("Pre-Order", case=False, na=False)
+        # 2. הזמנות מוקדמות: מכיל "Pre" (תופס גם Pre-Order וגם PreOrder)
+        mask_pre = df_all[COL_TYPE].astype(str).str.contains("Pre", case=False, na=False)
         df_pre = df_all[mask_pre].copy()
         
         if not df_pre.empty:
@@ -315,6 +321,14 @@ st.sidebar.title("תפריט")
 if st.sidebar.button("🔄 רענן נתונים עכשיו"):
     load_data_from_sql.clear()
     st.rerun()
+
+# --- בדיקת דיאגנוסטיקה להצגה למשתמש ---
+if "debug_types" in st.session_state:
+    debug_types = st.session_state["debug_types"]
+    # אם לא מצאנו "Pre", נציג התראה
+    has_pre = any("Pre" in str(x) for x in debug_types)
+    if not has_pre:
+        st.warning(f"⚠️ שים לב: לא נמצאו הזמנות מסוג 'Pre-Order' בבסיס הנתונים. הסוגים שנמצאו הם: {debug_types}")
 
 st.sidebar.divider()
 
