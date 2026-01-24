@@ -145,10 +145,11 @@ def load_data_from_sql():
             'order_date': COL_DATE, 'order_type': COL_TYPE
         })
 
+        # המרת תאריך ל-datetime (אבל לא מוחקים שורות עם שגיאות עדיין!)
         df_all[COL_DATE] = pd.to_datetime(df_all[COL_DATE], errors='coerce')
-        df_all = df_all.dropna(subset=[COL_DATE])
         df_all['date_only'] = df_all[COL_DATE].dt.date
 
+        # ניקוי עמודות אחרות
         cols_to_str = [COL_SKU, COL_ORDER_NUM, COL_SHIP_NUM]
         for col in cols_to_str:
             if col in df_all.columns:
@@ -163,13 +164,17 @@ def load_data_from_sql():
         if COL_SKU in df_all.columns:
             df_all[COL_SKU] = df_all[COL_SKU].apply(clean_sku)
 
-        # --- פיצול מדויק לפי ה-SQL שלך ---
+        # --- פיצול חכם (לפני מחיקת שורות בלי תאריך) ---
         
-        # 1. הזמנות רגילות
-        df_regular = df_all[df_all[COL_TYPE] == 'Regular Order'].copy()
+        # 1. הזמנות רגילות - כאן חייבים תאריך!
+        mask_regular = df_all[COL_TYPE].astype(str).str.contains("Regular", case=False, na=False)
+        df_regular = df_all[mask_regular].copy()
+        # מחיקת שורות בלי תאריך רק בהזמנות רגילות
+        df_regular = df_regular.dropna(subset=[COL_DATE])
         
-        # 2. הזמנות מוקדמות - התאמה מדויקת למחרוזת ב-SQL
-        df_pre = df_all[df_all[COL_TYPE] == 'Pre-Order (Long Delivery)'].copy()
+        # 2. הזמנות מוקדמות - כאן לא חייבים תאריך! (כי זה הזמנה עתידית)
+        mask_pre = df_all[COL_TYPE].astype(str).str.contains("Pre", case=False, na=False)
+        df_pre = df_all[mask_pre].copy()
         
         # חישוב Backlog
         if not df_pre.empty:
@@ -177,6 +182,7 @@ def load_data_from_sql():
         else:
             df_pre_grouped = pd.DataFrame(columns=[COL_SKU, 'backlog_qty'])
 
+        # מחזירים את כל הטבלה המקורית לחיפוש (df_all) בלי למחוק כלום
         return df_regular, df_pre_grouped, df_all
 
     except Exception as e:
@@ -307,9 +313,6 @@ def fetch_inventory_from_email():
 # ==========================================
 
 df, df_pre_orders, df_all_search = load_data_from_sql()
-
-# --- הודעת סטטוס קטנה לבדיקה ---
-st.toast(f"נטענו: {len(df)} הזמנות רגילות, {len(df_pre_orders)} הזמנות זמן-אספקה-ארוך", icon="ℹ️")
 
 # --- סרגל צד ---
 st.sidebar.title("תפריט")
