@@ -5,7 +5,7 @@ import re
 import imaplib
 import email
 from email.header import decode_header
-from email.utils import parsedate_to_datetime # <--- הוספתי לטיפול בתאריך מהמייל
+from email.utils import parsedate_to_datetime
 import io
 import os
 import numpy as np
@@ -36,9 +36,10 @@ COL_SHIP_NUM = 'מספר משלוח'
 COL_CITY = 'עיר'
 COL_STREET = 'רחוב'
 COL_HOUSE = 'מספר בית'
+COL_TYPE = 'סוג הזמנה' # עמודה חדשה מה-View
 
 INVENTORY_CACHE_FILE = "inventory_cache.csv"
-INVENTORY_DATE_FILE = "inventory_date.txt" # <--- קובץ לשמירת תאריך המלאי
+INVENTORY_DATE_FILE = "inventory_date.txt"
 
 # ==========================================
 # 🎨 CSS
@@ -112,10 +113,10 @@ def clean_sku(val):
     return val
 
 # ==========================================
-# 📥 טעינת נתונים (SQL + Email + Cache)
+# 📥 טעינת נתונים (SQL View + Email + Cache)
 # ==========================================
 
-@st.cache_data
+@st.cache_data(ttl=300)
 def load_data_from_sql():
     try:
         conn = psycopg2.connect(
@@ -127,60 +128,63 @@ def load_data_from_sql():
             sslmode='require'
         )
         
-        # 1. שליפת הזמנות רגילות
-        query_orders = """
-            SELECT order_num, customer_name, phone, city, street, house_num, sku, quantity, shipping_num, order_date 
-            FROM orders
+        # --- שינוי: שליפה מה-View המאוחד ---
+        # אנחנו שולפים הכל במכה אחת
+        query = """
+            SELECT 
+                order_num, customer_name, phone, city, street, house_num, 
+                sku, quantity, shipping_num, order_date, message_log, order_type 
+            FROM all_orders_view
         """
-        df = pd.read_sql(query_orders, conn)
-        
-        # 2. שליפת הזמנות עתידיות (Pre-Orders)
-        query_pre = "SELECT sku, quantity FROM pre_orders"
-        try:
-            df_pre = pd.read_sql(query_pre, conn)
-        except Exception:
-            df_pre = pd.DataFrame(columns=['sku', 'quantity'])
-            
+        df_all = pd.read_sql(query, conn)
         conn.close()
 
-        # עיבוד הזמנות רגילות
-        df = df.rename(columns={
+        # --- עיבוד נתונים אחיד לכולם ---
+        df_all = df_all.rename(columns={
             'order_num': COL_ORDER_NUM, 'customer_name': COL_CUSTOMER, 'phone': COL_PHONE,
             'city': COL_CITY, 'street': COL_STREET, 'house_num': COL_HOUSE,
-            'sku': COL_SKU, 'quantity': COL_QUANTITY, 'shipping_num': COL_SHIP_NUM, 'order_date': COL_DATE
+            'sku': COL_SKU, 'quantity': COL_QUANTITY, 'shipping_num': COL_SHIP_NUM, 
+            'order_date': COL_DATE, 'order_type': COL_TYPE
         })
 
-        df[COL_DATE] = pd.to_datetime(df[COL_DATE], errors='coerce')
-        df = df.dropna(subset=[COL_DATE])
-        df['date_only'] = df[COL_DATE].dt.date
+        df_all[COL_DATE] = pd.to_datetime(df_all[COL_DATE], errors='coerce')
+        df_all = df_all.dropna(subset=[COL_DATE])
+        df_all['date_only'] = df_all[COL_DATE].dt.date
 
         cols_to_str = [COL_SKU, COL_ORDER_NUM, COL_SHIP_NUM]
         for col in cols_to_str:
-            if col in df.columns:
-                df[col] = df[col].fillna("").astype(str).str.replace(r'\.0$', '', regex=True)
+            if col in df_all.columns:
+                df_all[col] = df_all[col].fillna("").astype(str).str.replace(r'\.0$', '', regex=True)
 
-        if COL_PHONE in df.columns:
-            df[COL_PHONE] = df[COL_PHONE].apply(normalize_phone_str)
+        if COL_PHONE in df_all.columns:
+            df_all[COL_PHONE] = df_all[COL_PHONE].apply(normalize_phone_str)
 
-        if COL_QUANTITY in df.columns:
-            df[COL_QUANTITY] = pd.to_numeric(df[COL_QUANTITY], errors='coerce').fillna(0).astype(int)
+        if COL_QUANTITY in df_all.columns:
+            df_all[COL_QUANTITY] = pd.to_numeric(df_all[COL_QUANTITY], errors='coerce').fillna(0).astype(int)
 
-        if COL_SKU in df.columns:
-            df[COL_SKU] = df[COL_SKU].apply(clean_sku)
-            
-        # עיבוד pre-orders
+        if COL_SKU in df_all.columns:
+            df_all[COL_SKU] = df_all[COL_SKU].apply(clean_sku)
+
+        # --- פיצול הנתונים להמשך עבודה תקין ---
+        
+        # 1. הזמנות רגילות (לדשבורד ולגרפים)
+        df_regular = df_all[df_all[COL_TYPE] == 'Regular Order'].copy()
+        
+        # 2. הזמנות זמן אספקה ארוך (לטבלת pre-orders ולחישובי מלאי)
+        df_pre = df_all[df_all[COL_TYPE] == 'Pre-Order (Long Delivery)'].copy()
+        
+        # קיבוץ Pre-Orders (כדי לשמור על המבנה שהדשבורד רגיל אליו)
         if not df_pre.empty:
-            df_pre['sku'] = df_pre['sku'].apply(clean_sku)
-            df_pre['quantity'] = pd.to_numeric(df_pre['quantity'], errors='coerce').fillna(0).astype(int)
-            df_pre_grouped = df_pre.groupby('sku')['quantity'].sum().reset_index().rename(columns={'quantity': 'backlog_qty'})
+            df_pre_grouped = df_pre.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index().rename(columns={COL_QUANTITY: 'backlog_qty'})
         else:
-            df_pre_grouped = pd.DataFrame(columns=['sku', 'backlog_qty'])
+            df_pre_grouped = pd.DataFrame(columns=[COL_SKU, 'backlog_qty'])
 
-        return df, df_pre_grouped
+        # מחזירים 3 משתנים: רגיל, מקובץ-עתידי, והטבלה המלאה (לשימוש עתידי)
+        return df_regular, df_pre_grouped, df_all
 
     except Exception as e:
         st.error(f"שגיאה בחיבור למסד הנתונים: {e}")
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 def load_inventory_cache():
     # טעינת הטבלה
@@ -312,8 +316,9 @@ def fetch_inventory_from_email():
 # 🖥️ ממשק ראשי
 # ==========================================
 
-# טעינת נתונים (רגילים + pre_orders)
-df, df_pre_orders = load_data_from_sql()
+# טעינת נתונים (רגילים + pre_orders + הכל)
+# שינוי: מקבלים עכשיו 3 משתנים
+df, df_pre_orders, df_all_search = load_data_from_sql()
 
 # --- סרגל צד ---
 st.sidebar.title("תפריט")
@@ -601,7 +606,7 @@ with tab_inventory:
         # טבלה 2: ימי מלאי נמוכים
         with row1_col2:
             st.markdown("#### ⏳ ימי מלאי נמוכים")
-            threshold_days = st.number_input("הצג מוצרים עם ימי מלאי מתחת ל:", min_value=0, value=121, step=1, key="th_days")
+            threshold_days = st.number_input("הצג מוצרים עם ימי מלאי מתחת ל:", min_value=0, value=31, step=1, key="th_days")
             
             df_low_days = merged[
                 (merged["days_of_inventory"] < threshold_days) & 
