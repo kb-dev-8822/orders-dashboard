@@ -163,14 +163,15 @@ def load_data_from_sql():
         if COL_SKU in df_all.columns:
             df_all[COL_SKU] = df_all[COL_SKU].apply(clean_sku)
 
-        # --- סינון לפי השמות המדויקים שהגדרת ב-VIEW ---
+        # --- פיצול מדויק לפי ה-SQL שלך ---
         
         # 1. הזמנות רגילות
         df_regular = df_all[df_all[COL_TYPE] == 'Regular Order'].copy()
         
-        # 2. הזמנות מוקדמות (בדיוק הטקסט שביקשת)
+        # 2. הזמנות מוקדמות - התאמה מדויקת למחרוזת ב-SQL
         df_pre = df_all[df_all[COL_TYPE] == 'Pre-Order (Long Delivery)'].copy()
         
+        # חישוב Backlog
         if not df_pre.empty:
             df_pre_grouped = df_pre.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index().rename(columns={COL_QUANTITY: 'backlog_qty'})
         else:
@@ -306,6 +307,9 @@ def fetch_inventory_from_email():
 # ==========================================
 
 df, df_pre_orders, df_all_search = load_data_from_sql()
+
+# --- הודעת סטטוס קטנה לבדיקה ---
+st.toast(f"נטענו: {len(df)} הזמנות רגילות, {len(df_pre_orders)} הזמנות זמן-אספקה-ארוך", icon="ℹ️")
 
 # --- סרגל צד ---
 st.sidebar.title("תפריט")
