@@ -128,66 +128,97 @@ def load_data_from_sql():
             sslmode='require'
         )
         
+        # שולפים הכל - כולל איסופים וחלקי חילוף
         query = """
             SELECT 
                 order_num, customer_name, phone, city, street, house_num, 
                 sku, quantity, shipping_num, order_date, message_log, order_type 
             FROM all_orders_view
         """
-        df_all = pd.read_sql(query, conn)
+        df_all_raw = pd.read_sql(query, conn)
         conn.close()
 
-        # עיבוד נתונים
-        df_all = df_all.rename(columns={
+        # עיבוד שמות עמודות
+        df_all_raw = df_all_raw.rename(columns={
             'order_num': COL_ORDER_NUM, 'customer_name': COL_CUSTOMER, 'phone': COL_PHONE,
             'city': COL_CITY, 'street': COL_STREET, 'house_num': COL_HOUSE,
             'sku': COL_SKU, 'quantity': COL_QUANTITY, 'shipping_num': COL_SHIP_NUM, 
             'order_date': COL_DATE, 'order_type': COL_TYPE
         })
 
-        # המרת תאריך ל-datetime (אבל לא מוחקים שורות עם שגיאות עדיין!)
-        df_all[COL_DATE] = pd.to_datetime(df_all[COL_DATE], errors='coerce')
-        df_all['date_only'] = df_all[COL_DATE].dt.date
+        # --- שלב הניקוי הראשוני (על הכל) ---
+        # המרת תאריך
+        df_all_raw[COL_DATE] = pd.to_datetime(df_all_raw[COL_DATE], errors='coerce')
+        df_all_raw['date_only'] = df_all_raw[COL_DATE].dt.date
 
-        # ניקוי עמודות אחרות
+        # ניקוי סטרינגים
         cols_to_str = [COL_SKU, COL_ORDER_NUM, COL_SHIP_NUM]
         for col in cols_to_str:
-            if col in df_all.columns:
-                df_all[col] = df_all[col].fillna("").astype(str).str.replace(r'\.0$', '', regex=True)
+            if col in df_all_raw.columns:
+                df_all_raw[col] = df_all_raw[col].fillna("").astype(str).str.replace(r'\.0$', '', regex=True)
 
-        if COL_PHONE in df_all.columns:
-            df_all[COL_PHONE] = df_all[COL_PHONE].apply(normalize_phone_str)
+        if COL_PHONE in df_all_raw.columns:
+            df_all_raw[COL_PHONE] = df_all_raw[COL_PHONE].apply(normalize_phone_str)
 
-        if COL_QUANTITY in df_all.columns:
-            df_all[COL_QUANTITY] = pd.to_numeric(df_all[COL_QUANTITY], errors='coerce').fillna(0).astype(int)
+        if COL_QUANTITY in df_all_raw.columns:
+            df_all_raw[COL_QUANTITY] = pd.to_numeric(df_all_raw[COL_QUANTITY], errors='coerce').fillna(0).astype(int)
 
-        if COL_SKU in df_all.columns:
-            df_all[COL_SKU] = df_all[COL_SKU].apply(clean_sku)
+        if COL_SKU in df_all_raw.columns:
+            df_all_raw[COL_SKU] = df_all_raw[COL_SKU].apply(clean_sku)
 
-        # --- פיצול חכם (לפני מחיקת שורות בלי תאריך) ---
+        # ==========================================
+        # 🚀 הפרדת כוחות (Logic Separation)
+        # ==========================================
+
+        # 1. יצירת טבלאות סיכום לחלקי חילוף ואיסופים (עבור לשונית מלאי בלבד)
+        # -----------------------------------------------------------------
         
-        # 1. הזמנות רגילות - כאן חייבים תאריך!
-        mask_regular = df_all[COL_TYPE].astype(str).str.contains("Regular", case=False, na=False)
-        df_regular = df_all[mask_regular].copy()
-        # מחיקת שורות בלי תאריך רק בהזמנות רגילות
+        # א. חלקי חילוף
+        mask_parts = df_all_raw[COL_TYPE] == 'Spare Part'
+        df_parts_raw = df_all_raw[mask_parts].copy()
+        # ספירה לפי מק"ט (כמה פעמים יצא חלק)
+        df_parts_agg = df_parts_raw.groupby(COL_SKU).size().reset_index(name='spare_count')
+
+        # ב. איסופים
+        mask_pickups = df_all_raw[COL_TYPE] == 'Pickup'
+        df_pickups_raw = df_all_raw[mask_pickups].copy()
+        # ספירה לפי מק"ט (כמה פעמים בוצע איסוף)
+        df_pickups_agg = df_pickups_raw.groupby(COL_SKU).size().reset_index(name='pickup_count')
+
+        # 2. ניקוי הטבלה הראשית לדשבורד (הסרת חלקי חילוף ואיסופים)
+        # -----------------------------------------------------------------
+        # אנחנו משאירים רק מה שהוא "Regular Order" או "Pre-Order" (או פשוט כל מה שלא מיוחד)
+        mask_sales = ~df_all_raw[COL_TYPE].isin(['Spare Part', 'Pickup'])
+        df_sales = df_all_raw[mask_sales].copy()
+
+        # 3. המשך עיבוד רגיל על טבלת המכירות בלבד (df_sales)
+        # -----------------------------------------------------------------
+        
+        # הזמנות רגילות - חייבות תאריך
+        mask_regular = df_sales[COL_TYPE].astype(str).str.contains("Regular", case=False, na=False)
+        df_regular = df_sales[mask_regular].copy()
         df_regular = df_regular.dropna(subset=[COL_DATE])
         
-        # 2. הזמנות מוקדמות - כאן לא חייבים תאריך! (כי זה הזמנה עתידית)
-        mask_pre = df_all[COL_TYPE].astype(str).str.contains("Pre", case=False, na=False)
-        df_pre = df_all[mask_pre].copy()
+        # הזמנות מוקדמות (Pre-Order) - לחישוב Backlog
+        mask_pre = df_sales[COL_TYPE].astype(str).str.contains("Pre", case=False, na=False)
+        df_pre = df_sales[mask_pre].copy()
         
-        # חישוב Backlog
         if not df_pre.empty:
             df_pre_grouped = df_pre.groupby(COL_SKU)[COL_QUANTITY].sum().reset_index().rename(columns={COL_QUANTITY: 'backlog_qty'})
         else:
             df_pre_grouped = pd.DataFrame(columns=[COL_SKU, 'backlog_qty'])
 
-        # מחזירים את כל הטבלה המקורית לחיפוש (df_all) בלי למחוק כלום
-        return df_regular, df_pre_grouped, df_all
+        # מחזירים:
+        # 1. df_regular -> לסטטיסטיקות ומכירות
+        # 2. df_pre_grouped -> לחישוב מלאי עתידי
+        # 3. df_sales -> לחיפוש כללי בדשבורד (בלי איסופים/חלקים)
+        # 4. df_parts_agg -> לטבלת חלקי חילוף
+        # 5. df_pickups_agg -> לטבלת איסופים
+        return df_regular, df_pre_grouped, df_sales, df_parts_agg, df_pickups_agg
 
     except Exception as e:
         st.error(f"שגיאה בחיבור למסד הנתונים: {e}")
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 def load_inventory_cache():
     df_inv = None
@@ -312,7 +343,8 @@ def fetch_inventory_from_email():
 # 🖥️ ממשק ראשי
 # ==========================================
 
-df, df_pre_orders, df_all_search = load_data_from_sql()
+# פריקת הנתונים - עכשיו מקבלים 5 דאטה-פריימים
+df, df_pre_orders, df_sales_all, df_parts, df_pickups = load_data_from_sql()
 
 # --- סרגל צד ---
 st.sidebar.title("תפריט")
@@ -341,6 +373,7 @@ if st.sidebar.button("📧 משוך מלאי עדכני"):
 st.title("📦 דשבורד ניהול הזמנות")
 
 # --- חישוב תחזית מכירות חודשית ---
+# משתמשים ב-df (שהוא רק מכירות רגילות עם תאריך)
 try:
     now = datetime.now(ZoneInfo("Asia/Jerusalem"))
 except Exception:
@@ -377,10 +410,11 @@ st.markdown("---")
 tab_dashboard, tab_inventory = st.tabs(["📊 דשבורד והזמנות", "🏭 ניתוח מלאי"])
 
 # ========================================================
-# TAB 1: דשבורד הזמנות
+# TAB 1: דשבורד הזמנות (מכירות בלבד)
 # ========================================================
 with tab_dashboard:
-    df_filtered = df.copy()
+    # משתמשים ב-df_sales_all (מכירות בלבד, כולל PRE, בלי חלקי חילוף)
+    df_filtered = df_sales_all.copy()
 
     with st.container():
         st.markdown("### 📅 סינון לפי תאריכים")
@@ -397,7 +431,7 @@ with tab_dashboard:
 
         if start_date and end_date:
             if start_date <= end_date:
-                mask_date = (df['date_only'] >= start_date) & (df['date_only'] <= end_date)
+                mask_date = (df_filtered['date_only'] >= start_date) & (df_filtered['date_only'] <= end_date)
                 df_filtered = df_filtered.loc[mask_date]
             else:
                 st.error("⚠️ תאריך התחלה מאוחר מתאריך סיום")
@@ -456,6 +490,7 @@ with tab_dashboard:
     cutoff_90 = datetime.now().date() - timedelta(days=90)
     cutoff_30 = datetime.now().date() - timedelta(days=30)
     
+    # שימוש ב-df (רק מכירות רגילות עם תאריך תקין) עבור סטטיסטיקות
     df_stats_90 = df[df['date_only'] >= cutoff_90].copy()
     df_stats_30 = df[df['date_only'] >= cutoff_30].copy()
     
@@ -656,3 +691,47 @@ with tab_inventory:
                 st.caption(f"נמצאו {len(pre_view)} מוצרים")
             else:
                 st.info("אין נתונים להצגה")
+        
+        # --- חלק חדש: טבלאות חלקי חילוף ואיסופים ---
+        st.divider()
+        st.subheader("🔧 דוח חלקי חילוף ואיסופים (כללי)")
+        
+        col_parts, col_pickups = st.columns(2)
+        
+        with col_parts:
+            st.markdown("#### 🔩 חלקי חילוף שנשלחו")
+            if not df_parts.empty:
+                df_parts_view = df_parts.rename(columns={
+                    COL_SKU: 'מק"ט',
+                    'spare_count': 'כמות פעמים שנשלח'
+                }).sort_values('כמות פעמים שנשלח', ascending=False)
+                
+                st.dataframe(
+                    df_parts_view,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "כמות פעמים שנשלח": st.column_config.NumberColumn("כמות פעמים שנשלח", format="%d")
+                    }
+                )
+            else:
+                st.info("אין נתונים על חלקי חילוף")
+
+        with col_pickups:
+            st.markdown("#### 🚚 איסופים שבוצעו")
+            if not df_pickups.empty:
+                df_pickups_view = df_pickups.rename(columns={
+                    COL_SKU: 'מק"ט',
+                    'pickup_count': 'כמות איסופים'
+                }).sort_values('כמות איסופים', ascending=False)
+                
+                st.dataframe(
+                    df_pickups_view,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "כמות איסופים": st.column_config.NumberColumn("כמות איסופים", format="%d")
+                    }
+                )
+            else:
+                st.info("אין נתונים על איסופים")
