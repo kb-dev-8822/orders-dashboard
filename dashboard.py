@@ -374,6 +374,8 @@ st.title("📦 דשבורד ניהול הזמנות")
 
 # --- חישוב תחזית מכירות חודשית ---
 # משתמשים ב-df (שהוא רק מכירות רגילות עם תאריך)
+df_for_calc = df_sales_all  # <--- השינוי הוא כאן!
+
 try:
     now = datetime.now(ZoneInfo("Asia/Jerusalem"))
 except Exception:
@@ -385,9 +387,10 @@ today_date = now.date()
 days_in_current_month = calendar.monthrange(now.year, now.month)[1]
 current_day_num = now.day
 
-df_curr_month = df[
-    (df['date_only'] >= current_month_start) & 
-    (df['date_only'] <= today_date)
+# משתמשים ב-df_for_calc החדש
+df_curr_month = df_for_calc[
+    (df_for_calc['date_only'] >= current_month_start) & 
+    (df_for_calc['date_only'] <= today_date)
 ]
 total_packages_mtd = df_curr_month[COL_QUANTITY].sum()
 
